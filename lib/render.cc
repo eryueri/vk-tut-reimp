@@ -102,6 +102,43 @@ vk::ShaderModule HelperFunc::createShaderModule(vk::Device device, const std::ve
   return shaderModule;
 }
 
+vk::SurfaceFormatKHR HelperFunc::chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats) {
+  for (const auto& availableFormat : availableFormats) {
+    if (availableFormat.format == vk::Format::eB8G8R8A8Srgb && availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+      return availableFormat;
+    }
+  }
+  return availableFormats[0];
+}
+
+vk::PresentModeKHR HelperFunc::chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes) {
+  for (const auto& availablePresentMode : availablePresentModes) {
+    if (availablePresentMode == vk::PresentModeKHR::eMailbox) {
+      return availablePresentMode;
+    }
+  }
+  return vk::PresentModeKHR::eFifo;
+}
+
+vk::Extent2D HelperFunc::chooseSwapExtent(GLFWwindow* window, const vk::SurfaceCapabilitiesKHR& capabilities) {
+  if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+    return capabilities.currentExtent;
+  } else {
+    int width, height;
+    glfwGetFramebufferSize(window, &width, &height);
+
+    vk::Extent2D actualExtent = {
+      static_cast<uint32_t>(width),
+      static_cast<uint32_t>(height)
+    };
+    
+    actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+    actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+
+    return actualExtent;
+  }
+}
+
 void BaseRender::connectWindow(GLFWwindow* w) {
   window = w;
 }
@@ -118,6 +155,7 @@ void BaseRender::drawFrame() {
 }
 
 void BaseRender::cleanup() {
+  device.destroy();
   instance.destroySurfaceKHR();
   instance.destroy();
 }
@@ -150,7 +188,9 @@ void BaseRender::createInstance() {
 }
 
 void BaseRender::createSurface() {
-  
+  VkSurfaceKHR _surface;
+  glfwCreateWindowSurface(static_cast<VkInstance>(instance), window, nullptr, &_surface);
+  surface = vk::SurfaceKHR(_surface);
 }
 
 void BaseRender::pickPhysicalDevice() {
@@ -190,4 +230,100 @@ void BaseRender::createLogicalDevice() {
 
   device.getQueue(indices.graphicsFamily.value(), 0, &graphicQueue);
   device.getQueue(indices.presentFamily.value(), 0, &presentQueue);
+}
+
+void BaseRender::createSwapChain() {
+  SwapChainSupportDetails swapChainSupport = HelperFunc::querySwapChainSupport(physicalDevice, surface);
+
+  vk::SurfaceFormatKHR surfaceFormat = HelperFunc::chooseSwapSurfaceFormat(swapChainSupport.formats);
+  vk::PresentModeKHR presentMode = HelperFunc::chooseSwapPresentMode(swapChainSupport.presentModes);
+  vk::Extent2D extent = HelperFunc::chooseSwapExtent(window, swapChainSupport.capabilities);
+
+  uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
+
+  if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) {
+    imageCount = swapChainSupport.capabilities.maxImageCount;
+  }
+
+  vk::SwapchainCreateInfoKHR createInfo;
+  createInfo.setSurface(surface);
+  createInfo.setMinImageCount(imageCount);
+  createInfo.setImageFormat(surfaceFormat.format);
+  createInfo.setImageColorSpace(surfaceFormat.colorSpace);
+  createInfo.setImageExtent(extent);
+  createInfo.setImageArrayLayers(1);
+  createInfo.setImageUsage(vk::ImageUsageFlagBits::eColorAttachment);
+  
+  QueueFamilyIndices indices = HelperFunc::findQueueFamilies(physicalDevice, surface);
+  std::vector<uint32_t> queueFamilyIndices = { indices.graphicsFamily.value(), indices.presentFamily.value() };
+
+  if (indices.graphicsFamily != indices.presentFamily) {
+    createInfo.setImageSharingMode(vk::SharingMode::eConcurrent);
+    createInfo.setQueueFamilyIndices(queueFamilyIndices);
+  } else {
+    createInfo.setImageSharingMode(vk::SharingMode::eExclusive);
+  }
+
+  createInfo.setPreTransform(swapChainSupport.capabilities.currentTransform);
+  createInfo.setCompositeAlpha(vk::CompositeAlphaFlagBitsKHR::eOpaque);
+  createInfo.setPresentMode(presentMode);
+  createInfo.setClipped(vk::Bool32(true));
+
+  swapChain = device.createSwapchainKHR(createInfo);
+
+  swapChainImages = device.getSwapchainImagesKHR(swapChain);
+  swapChainImageFormat = surfaceFormat.format;
+  swapChainExtent = extent;
+}
+
+void BaseRender::createImageViews() {
+  swapChainImageViews.resize(swapChainImages.size());
+  for (size_t i = 0; i < swapChainImages.size(); i++) {
+    vk::ImageViewCreateInfo createInfo;
+    createInfo.setImage(swapChainImages[i]);
+    createInfo.setViewType(vk::ImageViewType::e2D);
+    createInfo.setFormat(swapChainImageFormat);
+    createInfo.setComponents(vk::ComponentMapping(
+          vk::ComponentSwizzle::eIdentity,
+          vk::ComponentSwizzle::eIdentity,
+          vk::ComponentSwizzle::eIdentity,
+          vk::ComponentSwizzle::eIdentity)
+        );
+    createInfo.setSubresourceRange(vk::ImageSubresourceRange(
+          vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)
+        );
+    swapChainImageViews[i] = device.createImageView(createInfo);
+  }
+}
+
+void BaseRender::createRenderPass() {
+  vk::AttachmentDescription colorAttachment;
+  colorAttachment.setFormat(swapChainImageFormat);
+  colorAttachment.setSamples(vk::SampleCountFlagBits::e1);
+  colorAttachment.setLoadOp(vk::AttachmentLoadOp::eClear);
+  colorAttachment.setStoreOp(vk::AttachmentStoreOp::eStore);
+  colorAttachment.setStencilLoadOp(vk::AttachmentLoadOp::eDontCare);
+  colorAttachment.setStencilStoreOp(vk::AttachmentStoreOp::eDontCare);
+  colorAttachment.setInitialLayout(vk::ImageLayout::eUndefined);
+  colorAttachment.setFinalLayout(vk::ImageLayout::ePresentSrcKHR);
+}
+
+void BaseRender::createGraphicsPipeline() {
+
+}
+
+void BaseRender::createFrameBuffers() {
+
+}
+
+void BaseRender::createCommandPool() {
+
+}
+
+void BaseRender::createCommandBuffer() {
+
+}
+
+void BaseRender::createSyncObjects() {
+
 }

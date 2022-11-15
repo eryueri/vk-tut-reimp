@@ -1,13 +1,16 @@
 #pragma once
 
-#include <GLFW/glfw3.h>
 #include <vulkan/vulkan.hpp>
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
 
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
 #include <optional>
+#include <vector>
 #include <set>
+#include <limits>
 
 struct QueueFamilyIndices {
   std::optional<uint32_t> graphicsFamily;
@@ -32,6 +35,10 @@ namespace HelperFunc {
   bool isDeviceSuitable(vk::PhysicalDevice phyDevice, vk::SurfaceKHR surface);
 
   vk::ShaderModule createShaderModule(vk::Device device, const std::vector<char>& code);
+
+  vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
+  vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes);
+  vk::Extent2D chooseSwapExtent(GLFWwindow* window, const vk::SurfaceCapabilitiesKHR& capabilities);
 };
 
 class BaseRender {
