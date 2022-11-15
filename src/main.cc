@@ -1,12 +1,10 @@
-#include "app.hh"
+#include "window.hh"
 
 int main() {
-  HelloTriangle::Application* app;
-
-  app = HelloTriangle::Application::getInstance();
+  Window::MainWindow* window = Window::MainWindow::getInstance();
 
   try {
-    app->run();
+    window->run();
   } catch (const std::exception& e) {
     std::cerr << e.what() << std::endl;
     return EXIT_FAILURE;
