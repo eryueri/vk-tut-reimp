@@ -1,5 +1,7 @@
 #include "render.hh"
 
+#define DEBUG
+
 #ifdef DEBUG
   const bool enableValidationLayers = true;
 #else
@@ -12,12 +14,14 @@
   }
 
 namespace globalTables {
+  static const uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+
   const std::vector<const char*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
   };
 
   const std::vector<const char*> deviceExtensions = {
-    "VK_KHR_swapchain"
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME
   };
 };
 
@@ -139,6 +143,10 @@ vk::Extent2D HelperFunc::chooseSwapExtent(GLFWwindow* window, const vk::SurfaceC
   }
 }
 
+BaseRender::BaseRender() {}
+
+BaseRender::~BaseRender() {}
+
 void BaseRender::connectWindow(GLFWwindow* w) {
   window = w;
 }
@@ -148,16 +156,103 @@ void BaseRender::init() {
   createSurface();
   pickPhysicalDevice();
   createLogicalDevice();
+  createSwapChain();
+  createImageViews();
+  createRenderPass();
+  createGraphicsPipeline();
+  createFrameBuffers();
+  createCommandPool();
+  allocateCommandBuffers();
+  createSyncObjects();
 }
 
 void BaseRender::drawFrame() {
+  static uint32_t currentFrame = 0;
+  vk::resultCheck(
+      device.waitForFences(1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX), 
+      "error when waiting for fence..."
+      );
+  
+  uint32_t imageIndex;
+  vk::Result acquireResult = device.acquireNextImageKHR(swapChain, UINT64_MAX, imageAvailbleSemaphores[currentFrame], nullptr, &imageIndex);
 
+  if (acquireResult == vk::Result::eErrorOutOfDateKHR) {
+    recreateSwapChain();
+    return;
+  } else if (acquireResult != vk::Result::eSuccess && acquireResult != vk::Result::eSuboptimalKHR) {
+    throw std::runtime_error("trouble acquiring next image...");
+  }
+
+  vk::resultCheck(
+      device.resetFences(1, &inFlightFences[currentFrame]),
+      "error when reseting fence..."
+      );
+
+  commandBuffers[currentFrame].reset();
+  recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
+
+  vk::SubmitInfo submitInfo;
+
+  std::vector<vk::Semaphore> waitSemaphores = { imageAvailbleSemaphores[currentFrame] };
+  std::vector<vk::PipelineStageFlags> waitStages = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
+  std::vector<vk::Semaphore> signalSemaphores = { renderFinishedSemaphores[currentFrame] };
+
+  submitInfo.setWaitSemaphores(waitSemaphores);
+  submitInfo.setWaitDstStageMask(waitStages);
+
+  submitInfo.setSignalSemaphores(signalSemaphores);
+  
+  submitInfo.setCommandBufferCount(1);
+  submitInfo.setPCommandBuffers(&commandBuffers[currentFrame]);
+
+  vk::resultCheck(
+      graphicQueue.submit(1, &submitInfo, inFlightFences[currentFrame]),
+      "trouble submitting commandbuffer..."
+      );
+
+  vk::PresentInfoKHR presentInfo;
+  presentInfo.setWaitSemaphores(signalSemaphores);
+
+  std::vector<vk::SwapchainKHR> swapChains = { swapChain };
+
+  presentInfo.setSwapchains(swapChains);
+
+  presentInfo.setPImageIndices(&imageIndex);
+
+  vk::Result presentResult = presentQueue.presentKHR(presentInfo);
+
+  if (presentResult == vk::Result::eErrorOutOfDateKHR || presentResult == vk::Result::eSuboptimalKHR || framebufferResized) {
+    recreateSwapChain();
+    setFramebufferResized(false);
+  } else if (presentResult != vk::Result::eSuccess) {
+      throw std::runtime_error("trouble presenting image...");
+  }
+
+  currentFrame = (currentFrame + 1) % globalTables::MAX_FRAMES_IN_FLIGHT;
 }
 
 void BaseRender::cleanup() {
+  cleanupSwapChain();
+
+  device.destroyPipeline(graphicsPipeline);
+  device.destroyPipelineLayout(pipelineLayout);
+  device.destroyRenderPass(renderPass);
+
+  for (size_t i = 0; i < globalTables::MAX_FRAMES_IN_FLIGHT; i++) {
+    device.destroySemaphore(imageAvailbleSemaphores[i]);
+    device.destroySemaphore(renderFinishedSemaphores[i]);
+    device.destroyFence(inFlightFences[i]);
+  }
+
+  device.destroyCommandPool(commandPool);
   device.destroy();
-  instance.destroySurfaceKHR();
+
+  instance.destroySurfaceKHR(surface);
   instance.destroy();
+}
+
+void BaseRender::setFramebufferResized(bool v) {
+  framebufferResized = v;
 }
 
 void BaseRender::createInstance() {
@@ -175,11 +270,17 @@ void BaseRender::createInstance() {
 
   vk::InstanceCreateInfo createInfo;
   createInfo.setPApplicationInfo(&appInfo);
-  createInfo.setEnabledExtensionCount(0);
+  
+  uint32_t glfwExtensionCount = 0;
+  const char** glfwExtensions;
+  
+  glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+  
+  createInfo.setEnabledExtensionCount(glfwExtensionCount);
+  createInfo.setPpEnabledExtensionNames(glfwExtensions);
 
   if (enableValidationLayers) {
-    createInfo.setEnabledLayerCount(static_cast<uint32_t>(globalTables::validationLayers.size()));
-    createInfo.setPpEnabledLayerNames(globalTables::validationLayers.data());
+    createInfo.setPEnabledLayerNames(globalTables::validationLayers);
   } else {
     createInfo.setEnabledLayerCount(0);
   }
@@ -189,7 +290,11 @@ void BaseRender::createInstance() {
 
 void BaseRender::createSurface() {
   VkSurfaceKHR _surface;
-  glfwCreateWindowSurface(static_cast<VkInstance>(instance), window, nullptr, &_surface);
+  VkResult result = glfwCreateWindowSurface(static_cast<VkInstance>(instance), window, nullptr, &_surface);
+  IF_THROW(
+      result != VK_SUCCESS,
+      failed to create surface...
+      )
   surface = vk::SurfaceKHR(_surface);
 }
 
@@ -267,7 +372,7 @@ void BaseRender::createSwapChain() {
   createInfo.setPreTransform(swapChainSupport.capabilities.currentTransform);
   createInfo.setCompositeAlpha(vk::CompositeAlphaFlagBitsKHR::eOpaque);
   createInfo.setPresentMode(presentMode);
-  createInfo.setClipped(vk::Bool32(true));
+  createInfo.setClipped(VK_TRUE);
 
   swapChain = device.createSwapchainKHR(createInfo);
 
@@ -289,7 +394,7 @@ void BaseRender::createImageViews() {
           vk::ComponentSwizzle::eIdentity,
           vk::ComponentSwizzle::eIdentity)
         );
-    createInfo.setSubresourceRange(vk::ImageSubresourceRange(
+    createInfo.setSubresourceRange(vk::ImageSubresourceRange( // SUS
           vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)
         );
     swapChainImageViews[i] = device.createImageView(createInfo);
@@ -306,24 +411,261 @@ void BaseRender::createRenderPass() {
   colorAttachment.setStencilStoreOp(vk::AttachmentStoreOp::eDontCare);
   colorAttachment.setInitialLayout(vk::ImageLayout::eUndefined);
   colorAttachment.setFinalLayout(vk::ImageLayout::ePresentSrcKHR);
+
+  vk::AttachmentReference colorAttachmentRef;
+  colorAttachmentRef.setAttachment(0);
+  colorAttachmentRef.setLayout(vk::ImageLayout::eColorAttachmentOptimal);
+
+  vk::SubpassDescription subpass;
+  subpass.setPipelineBindPoint(vk::PipelineBindPoint::eGraphics);
+  subpass.setColorAttachments(colorAttachmentRef);
+
+  vk::SubpassDependency dependency;
+  dependency.setSrcSubpass(VK_SUBPASS_EXTERNAL);
+  dependency.setDstSubpass(0);
+  dependency.setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
+  dependency.setSrcAccessMask(vk::AccessFlagBits::eNone);
+  dependency.setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
+  dependency.setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite);
+
+  vk::RenderPassCreateInfo createInfo;
+  createInfo.setAttachments(colorAttachment);
+  createInfo.setSubpasses(subpass);
+  createInfo.setDependencies(dependency);
+
+  renderPass = device.createRenderPass(createInfo);
 }
 
 void BaseRender::createGraphicsPipeline() {
+  auto vertShaderCode = myUtils::readBinaryFile("../glslShaders/build/vert.spv");
+  auto fragShaderCode = myUtils::readBinaryFile("../glslShaders/build/frag.spv");
 
+  vk::ShaderModule vertShaderModule = HelperFunc::createShaderModule(device, vertShaderCode);
+  vk::ShaderModule fragShaderModule = HelperFunc::createShaderModule(device, fragShaderCode);
+
+  vk::PipelineShaderStageCreateInfo vertShaderStageInfo;
+  vertShaderStageInfo.setStage(vk::ShaderStageFlagBits::eVertex);
+  vertShaderStageInfo.setModule(vertShaderModule);
+  vertShaderStageInfo.setPName("main");
+
+  vk::PipelineShaderStageCreateInfo fragShaderStageInfo;
+  fragShaderStageInfo.setStage(vk::ShaderStageFlagBits::eFragment);
+  fragShaderStageInfo.setModule(fragShaderModule);
+  fragShaderStageInfo.setPName("main");
+
+  vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
+  vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
+
+  vk::PipelineInputAssemblyStateCreateInfo inputAssembly;
+  inputAssembly.setTopology(vk::PrimitiveTopology::eTriangleList);
+  inputAssembly.setPrimitiveRestartEnable(VK_FALSE);
+
+  vk::Viewport viewport;
+  viewport.setX(0.0f);
+  viewport.setY(0.0f);
+  viewport.setWidth(static_cast<float>(swapChainExtent.width));
+  viewport.setHeight(static_cast<float>(swapChainExtent.height));
+  viewport.setMinDepth(0.0f);
+  viewport.setMaxDepth(1.0f);
+
+  vk::Rect2D scissor;
+  scissor.setOffset(vk::Offset2D(0, 0));
+  scissor.setExtent(swapChainExtent);
+
+  std::vector<vk::DynamicState> dynamicStates = {
+    vk::DynamicState::eViewport,
+    vk::DynamicState::eScissor
+  };
+
+  vk::PipelineDynamicStateCreateInfo dynamicState;
+  dynamicState.setDynamicStates(dynamicStates);
+
+  vk::PipelineViewportStateCreateInfo viewportState;
+  viewportState.setViewports(viewport);
+  viewportState.setScissors(scissor);
+
+  vk::PipelineRasterizationStateCreateInfo rasterizer;
+  rasterizer.setDepthClampEnable(VK_FALSE);
+  rasterizer.setRasterizerDiscardEnable(VK_FALSE);
+  rasterizer.setPolygonMode(vk::PolygonMode::eFill);
+  rasterizer.setLineWidth(1.0f);
+  rasterizer.setCullMode(vk::CullModeFlagBits::eBack);
+  rasterizer.setFrontFace(vk::FrontFace::eClockwise);
+  rasterizer.setDepthBiasEnable(VK_FALSE);
+
+  vk::PipelineMultisampleStateCreateInfo multisampling;
+  multisampling.setSampleShadingEnable(VK_FALSE);
+  multisampling.setRasterizationSamples(vk::SampleCountFlagBits::e1);
+
+  vk::PipelineColorBlendAttachmentState colorBlendAttachment;
+  colorBlendAttachment.setColorWriteMask( // SUS
+      vk::ColorComponentFlagBits::eR | 
+      vk::ColorComponentFlagBits::eG |
+      vk::ColorComponentFlagBits::eB |
+      vk::ColorComponentFlagBits::eA
+      );
+  colorBlendAttachment.setBlendEnable(VK_FALSE);
+
+  vk::PipelineColorBlendStateCreateInfo colorBlending;
+  colorBlending.setLogicOpEnable(VK_FALSE);
+  colorBlending.setAttachments(colorBlendAttachment);
+
+  vk::PipelineLayoutCreateInfo pipelineLayoutInfo;
+
+  pipelineLayout = device.createPipelineLayout(pipelineLayoutInfo);
+
+  vk::GraphicsPipelineCreateInfo pipelineInfo;
+  pipelineInfo.setStages(shaderStages);
+  pipelineInfo.setPVertexInputState(&vertexInputInfo);
+  pipelineInfo.setPInputAssemblyState(&inputAssembly);
+  pipelineInfo.setPViewportState(&viewportState);
+  pipelineInfo.setPRasterizationState(&rasterizer);
+  pipelineInfo.setPMultisampleState(&multisampling);
+  pipelineInfo.setPColorBlendState(&colorBlending);
+  pipelineInfo.setPDynamicState(&dynamicState);
+  pipelineInfo.setLayout(pipelineLayout);
+  pipelineInfo.setRenderPass(renderPass);
+  pipelineInfo.setSubpass(0);
+
+  vk::Result result;
+
+  std::tie(result, graphicsPipeline) = device.createGraphicsPipeline(nullptr, pipelineInfo);
+
+  IF_THROW(
+      result != vk::Result::eSuccess,
+      failed to create graphicsPipeline...
+      )
+
+  device.destroyShaderModule(fragShaderModule);
+  device.destroyShaderModule(vertShaderModule);
 }
 
 void BaseRender::createFrameBuffers() {
+  swapChainFramebuffers.resize(swapChainImageViews.size());
+  for (size_t i = 0; i < swapChainImageViews.size(); i++) {
+    std::vector<vk::ImageView> attachments = { swapChainImageViews[i] };
 
+    vk::FramebufferCreateInfo createInfo;
+    createInfo.setRenderPass(renderPass);
+    createInfo.setAttachments(attachments);
+    createInfo.setWidth(swapChainExtent.width);
+    createInfo.setHeight(swapChainExtent.height);
+    createInfo.setLayers(1);
+
+    swapChainFramebuffers[i] = device.createFramebuffer(createInfo);
+  }
 }
 
 void BaseRender::createCommandPool() {
+  QueueFamilyIndices indices = HelperFunc::findQueueFamilies(physicalDevice, surface);
 
+  vk::CommandPoolCreateInfo createInfo;
+  createInfo.setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer);
+  createInfo.setQueueFamilyIndex(indices.graphicsFamily.value());
+
+  commandPool = device.createCommandPool(createInfo);
 }
 
-void BaseRender::createCommandBuffer() {
+void BaseRender::allocateCommandBuffers() {
+  commandBuffers.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
+  
+  vk::CommandBufferAllocateInfo allocInfo;
+  allocInfo.setCommandPool(commandPool);
+  allocInfo.setLevel(vk::CommandBufferLevel::ePrimary);
+  allocInfo.setCommandBufferCount((uint32_t)commandBuffers.size());
 
+  commandBuffers = device.allocateCommandBuffers(allocInfo);
+}
+
+void BaseRender::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t imageIndex) {
+  vk::CommandBufferBeginInfo beginInfo;
+  beginInfo.setFlags(vk::CommandBufferUsageFlags(0));
+  beginInfo.setPInheritanceInfo(nullptr);
+
+  commandBuffer.begin(beginInfo);
+
+  vk::RenderPassBeginInfo renderPassInfo;
+  renderPassInfo.setRenderPass(renderPass);
+  renderPassInfo.setFramebuffer(swapChainFramebuffers[imageIndex]);
+  renderPassInfo.setRenderArea( // SUS
+      vk::Rect2D(
+          {0, 0},
+          swapChainExtent
+        )
+      );
+  vk::ClearValue clearColor(vk::ClearColorValue().setFloat32({0.0f, 0.0f, 0.0f, 0.5f}));
+  renderPassInfo.setClearValues(clearColor);
+
+  commandBuffer.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
+
+  commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
+
+  vk::Viewport viewport;
+  viewport.setX(0.0f);
+  viewport.setY(0.0f);
+  viewport.setWidth(static_cast<float>(swapChainExtent.width));
+  viewport.setHeight(static_cast<float>(swapChainExtent.height));
+  viewport.setMinDepth(0.0f);
+  viewport.setMaxDepth(1.0f);
+  
+  commandBuffer.setViewport(0, 1, &viewport);
+
+  vk::Rect2D scissor;
+  scissor.setOffset(vk::Offset2D(0, 0));
+  scissor.setExtent(swapChainExtent);
+  
+  commandBuffer.setScissor(0, 1, &scissor);
+
+  commandBuffer.draw(3, 1, 0, 0);
+
+  commandBuffer.endRenderPass();
+
+  commandBuffer.end();
 }
 
 void BaseRender::createSyncObjects() {
+  imageAvailbleSemaphores.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
+  renderFinishedSemaphores.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
+  inFlightFences.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
 
+  vk::SemaphoreCreateInfo semaphoreInfo;
+
+  vk::FenceCreateInfo fenceInfo;
+  fenceInfo.setFlags(vk::FenceCreateFlagBits::eSignaled);
+
+  for (size_t i = 0; i < globalTables::MAX_FRAMES_IN_FLIGHT; i++) {
+    imageAvailbleSemaphores[i] = device.createSemaphore(semaphoreInfo);
+    renderFinishedSemaphores[i] = device.createSemaphore(semaphoreInfo);
+    inFlightFences[i] = device.createFence(fenceInfo);
+  }
+}
+
+void BaseRender::cleanupSwapChain() {
+  device.waitIdle();
+
+  for (size_t i = 0; i < swapChainFramebuffers.size(); i++) {
+    device.destroyFramebuffer(swapChainFramebuffers[i]);
+  }
+
+  for (size_t i = 0; i < swapChainImageViews.size(); i++) {
+    device.destroyImageView(swapChainImageViews[i]);
+  }
+
+  device.destroySwapchainKHR(swapChain);
+}
+
+void BaseRender::recreateSwapChain() {
+  int width = 0, height = 0;
+  glfwGetFramebufferSize(window, &width, &height);
+  while(width == 0 || height == 0) {
+    glfwGetFramebufferSize(window, &width, &height);
+    glfwWaitEvents();  
+  }
+
+  cleanupSwapChain();
+
+  createSwapChain();
+  createImageViews();
+  createFrameBuffers();
 }

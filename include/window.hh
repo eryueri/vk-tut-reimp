@@ -2,7 +2,7 @@
 
 #include "render.hh"
 
-namespace Window{
+namespace myWindow{
   class MainWindow{
   public:
     static MainWindow* getInstance();
@@ -14,8 +14,10 @@ namespace Window{
     void mainLoop();
     void cleanup();
     static void keyCallBack(GLFWwindow* window, int key, int scancode, int action, int mods);
+    static void framebufferResizeCallBack(GLFWwindow* window, int width, int height);
   private:
     static MainWindow* _instance;
     GLFWwindow* window;
+    BaseRender render;
   };
 };

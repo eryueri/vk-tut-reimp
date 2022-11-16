@@ -1,7 +1,7 @@
 #include "window.hh"
 
 int main() {
-  Window::MainWindow* window = Window::MainWindow::getInstance();
+  myWindow::MainWindow* window = myWindow::MainWindow::getInstance();
 
   try {
     window->run();

@@ -3,7 +3,7 @@
 static const uint32_t WIDTH = 800;
 static const uint32_t HEIGHT = 600;
 
-namespace Window {
+namespace myWindow {
   MainWindow* MainWindow::_instance = nullptr;
   MainWindow::MainWindow() {}
   MainWindow::~MainWindow() {}
@@ -21,16 +21,24 @@ namespace Window {
   void MainWindow::init() {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
     window = glfwCreateWindow(WIDTH, HEIGHT, "vulkan-reimp", nullptr, nullptr);
+    render.connectWindow(window);
+    render.init();
+    
+    glfwSetWindowUserPointer(window, &render);
+
     glfwSetKeyCallback(window, keyCallBack);
+    glfwSetFramebufferSizeCallback(window, framebufferResizeCallBack);
   }
   void MainWindow::mainLoop() {
     while(!glfwWindowShouldClose(window)) {
       glfwPollEvents();
+      render.drawFrame();
     }
   }
   void MainWindow::cleanup() {
+    render.cleanup();
     glfwDestroyWindow(window);
     glfwTerminate();
   }
@@ -38,5 +46,9 @@ namespace Window {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
       glfwSetWindowShouldClose(window, GLFW_TRUE);
     }
+  }
+  void MainWindow::framebufferResizeCallBack(GLFWwindow* window, int width, int height) {
+    auto app = reinterpret_cast<BaseRender*>(glfwGetWindowUserPointer(window));
+    app->setFramebufferResized(true);
   }
 };

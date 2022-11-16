@@ -12,6 +12,8 @@
 #include <set>
 #include <limits>
 
+#include "utils.hh"
+
 struct QueueFamilyIndices {
   std::optional<uint32_t> graphicsFamily;
   std::optional<uint32_t> presentFamily;
@@ -49,6 +51,9 @@ public:
   virtual void init();
   virtual void drawFrame();
   virtual void cleanup();
+  void setFramebufferResized(bool v);
+private:
+  bool framebufferResized = false;
 private:
   GLFWwindow* window;
 private:
@@ -69,7 +74,7 @@ private:
 
   vk::RenderPass renderPass;
   vk::PipelineLayout pipelineLayout;
-  vk::Pipeline graphicPipeline;
+  vk::Pipeline graphicsPipeline;
 
   vk::CommandPool commandPool;
   std::vector<vk::CommandBuffer> commandBuffers;
@@ -87,6 +92,10 @@ private:
   virtual void createGraphicsPipeline();
   virtual void createFrameBuffers();
   virtual void createCommandPool();
-  virtual void createCommandBuffer();
+  virtual void allocateCommandBuffers();
+  virtual void recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t iamgeIndex);
   virtual void createSyncObjects();
+
+  virtual void cleanupSwapChain();
+  virtual void recreateSwapChain();
 };
