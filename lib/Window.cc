@@ -1,4 +1,7 @@
-#include "window.hh"
+#include "Window.hh"
+
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
 
 static const uint32_t WIDTH = 800;
 static const uint32_t HEIGHT = 600;
@@ -48,7 +51,7 @@ namespace myWindow {
     }
   }
   void MainWindow::framebufferResizeCallBack(GLFWwindow* window, int width, int height) {
-    auto app = reinterpret_cast<BaseRender*>(glfwGetWindowUserPointer(window));
+    auto app = reinterpret_cast<BaseRenderer*>(glfwGetWindowUserPointer(window));
     app->setFramebufferResized(true);
   }
 };

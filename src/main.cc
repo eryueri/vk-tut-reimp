@@ -1,4 +1,4 @@
-#include "window.hh"
+#include "Window.hh"
 
 int main() {
   myWindow::MainWindow* window = myWindow::MainWindow::getInstance();

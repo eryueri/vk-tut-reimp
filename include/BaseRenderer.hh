@@ -1,18 +1,10 @@
 #pragma once
 
-#include <vulkan/vulkan.hpp>
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-
-#include <iostream>
-#include <stdexcept>
-#include <cstdlib>
 #include <optional>
-#include <vector>
-#include <set>
-#include <limits>
 
-#include "utils.hh"
+#include <vulkan/vulkan.hpp>
+
+struct GLFWwindow;
 
 struct QueueFamilyIndices {
   std::optional<uint32_t> graphicsFamily;
@@ -43,10 +35,10 @@ namespace HelperFunc {
   vk::Extent2D chooseSwapExtent(GLFWwindow* window, const vk::SurfaceCapabilitiesKHR& capabilities);
 };
 
-class BaseRender {
+class BaseRenderer {
 public:
-  BaseRender();
-  ~BaseRender();
+  BaseRenderer();
+  virtual ~BaseRenderer();
   virtual void connectWindow(GLFWwindow* w);
   virtual void init();
   virtual void drawFrame();
@@ -78,7 +70,7 @@ private:
 
   vk::CommandPool commandPool;
   std::vector<vk::CommandBuffer> commandBuffers;
-  std::vector<vk::Semaphore> imageAvailbleSemaphores;
+  std::vector<vk::Semaphore> imageAvailableSemaphores;
   std::vector<vk::Semaphore> renderFinishedSemaphores;
   std::vector<vk::Fence> inFlightFences;
 private:

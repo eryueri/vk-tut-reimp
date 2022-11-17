@@ -5,6 +5,12 @@ project(my_vulkan_tut_reimplement)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+set(IS_DEBUG_BUILD CMAKE_BUILD_TYPE STREQUAL "Debug")
+
+if (${IS_DEBUG_BUILD})
+    add_compile_definitions(DEBUG)
+endif ()
+
 include_directories(include/)
 
 aux_source_directory(./lib LIB_FILES)

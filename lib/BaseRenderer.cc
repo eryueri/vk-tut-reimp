@@ -1,6 +1,18 @@
-#include "render.hh"
+#include "BaseRenderer.hh"
 
-#define DEBUG
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
+#include <glm/glm.hpp>
+
+#include <iostream>
+#include <stdexcept>
+#include <cstdlib>
+#include <vector>
+#include <set>
+#include <limits>
+
+#include "Utils.hh"
 
 #ifdef DEBUG
   const bool enableValidationLayers = true;
@@ -143,15 +155,15 @@ vk::Extent2D HelperFunc::chooseSwapExtent(GLFWwindow* window, const vk::SurfaceC
   }
 }
 
-BaseRender::BaseRender() {}
+BaseRenderer::BaseRenderer() {}
 
-BaseRender::~BaseRender() {}
+BaseRenderer::~BaseRenderer() {}
 
-void BaseRender::connectWindow(GLFWwindow* w) {
+void BaseRenderer::connectWindow(GLFWwindow* w) {
   window = w;
 }
 
-void BaseRender::init() {
+void BaseRenderer::init() {
   createInstance();
   createSurface();
   pickPhysicalDevice();
@@ -166,7 +178,7 @@ void BaseRender::init() {
   createSyncObjects();
 }
 
-void BaseRender::drawFrame() {
+void BaseRenderer::drawFrame() {
   static uint32_t currentFrame = 0;
   vk::resultCheck(
       device.waitForFences(1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX), 
@@ -174,7 +186,7 @@ void BaseRender::drawFrame() {
       );
   
   uint32_t imageIndex;
-  vk::Result acquireResult = device.acquireNextImageKHR(swapChain, UINT64_MAX, imageAvailbleSemaphores[currentFrame], nullptr, &imageIndex);
+  vk::Result acquireResult = device.acquireNextImageKHR(swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], nullptr, &imageIndex);
 
   if (acquireResult == vk::Result::eErrorOutOfDateKHR) {
     recreateSwapChain();
@@ -193,7 +205,7 @@ void BaseRender::drawFrame() {
 
   vk::SubmitInfo submitInfo;
 
-  std::vector<vk::Semaphore> waitSemaphores = { imageAvailbleSemaphores[currentFrame] };
+  std::vector<vk::Semaphore> waitSemaphores = { imageAvailableSemaphores[currentFrame] };
   std::vector<vk::PipelineStageFlags> waitStages = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
   std::vector<vk::Semaphore> signalSemaphores = { renderFinishedSemaphores[currentFrame] };
 
@@ -231,7 +243,7 @@ void BaseRender::drawFrame() {
   currentFrame = (currentFrame + 1) % globalTables::MAX_FRAMES_IN_FLIGHT;
 }
 
-void BaseRender::cleanup() {
+void BaseRenderer::cleanup() {
   cleanupSwapChain();
 
   device.destroyPipeline(graphicsPipeline);
@@ -239,7 +251,7 @@ void BaseRender::cleanup() {
   device.destroyRenderPass(renderPass);
 
   for (size_t i = 0; i < globalTables::MAX_FRAMES_IN_FLIGHT; i++) {
-    device.destroySemaphore(imageAvailbleSemaphores[i]);
+    device.destroySemaphore(imageAvailableSemaphores[i]);
     device.destroySemaphore(renderFinishedSemaphores[i]);
     device.destroyFence(inFlightFences[i]);
   }
@@ -251,22 +263,22 @@ void BaseRender::cleanup() {
   instance.destroy();
 }
 
-void BaseRender::setFramebufferResized(bool v) {
+void BaseRenderer::setFramebufferResized(bool v) {
   framebufferResized = v;
 }
 
-void BaseRender::createInstance() {
+void BaseRenderer::createInstance() {
   IF_THROW(
       enableValidationLayers && !HelperFunc::validationLayerSupportChecked(globalTables::validationLayers),
       failed to enable validation layer
       )
 
   vk::ApplicationInfo appInfo;
-  appInfo.setPApplicationName("BaseRender Application");
-  appInfo.setApplicationVersion(VK_MAKE_VERSION(1, 0, 0));
-  appInfo.setPEngineName("No Engine");
-  appInfo.setEngineVersion(VK_MAKE_VERSION(1, 0, 0));
-  appInfo.setApiVersion(VK_API_VERSION_1_0);
+  appInfo.setPApplicationName("BaseRenderer Application")
+         .setApplicationVersion(VK_MAKE_VERSION(1, 0, 0))
+         .setPEngineName("No Engine")
+         .setEngineVersion(VK_MAKE_VERSION(1, 0, 0))
+         .setApiVersion(VK_API_VERSION_1_0);
 
   vk::InstanceCreateInfo createInfo;
   createInfo.setPApplicationInfo(&appInfo);
@@ -288,7 +300,7 @@ void BaseRender::createInstance() {
   instance = vk::createInstance(createInfo);
 }
 
-void BaseRender::createSurface() {
+void BaseRenderer::createSurface() {
   VkSurfaceKHR _surface;
   VkResult result = glfwCreateWindowSurface(static_cast<VkInstance>(instance), window, nullptr, &_surface);
   IF_THROW(
@@ -298,7 +310,7 @@ void BaseRender::createSurface() {
   surface = vk::SurfaceKHR(_surface);
 }
 
-void BaseRender::pickPhysicalDevice() {
+void BaseRenderer::pickPhysicalDevice() {
   std::vector<vk::PhysicalDevice> phyDevices = instance.enumeratePhysicalDevices();
   for (const auto& phyDevice : phyDevices) {
     if (HelperFunc::isDeviceSuitable(phyDevice, surface)) {
@@ -308,7 +320,7 @@ void BaseRender::pickPhysicalDevice() {
   }
 }
 
-void BaseRender::createLogicalDevice() {
+void BaseRenderer::createLogicalDevice() {
   QueueFamilyIndices indices = HelperFunc::findQueueFamilies(physicalDevice, surface);
 
   std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
@@ -337,7 +349,7 @@ void BaseRender::createLogicalDevice() {
   device.getQueue(indices.presentFamily.value(), 0, &presentQueue);
 }
 
-void BaseRender::createSwapChain() {
+void BaseRenderer::createSwapChain() {
   SwapChainSupportDetails swapChainSupport = HelperFunc::querySwapChainSupport(physicalDevice, surface);
 
   vk::SurfaceFormatKHR surfaceFormat = HelperFunc::chooseSwapSurfaceFormat(swapChainSupport.formats);
@@ -377,11 +389,12 @@ void BaseRender::createSwapChain() {
   swapChain = device.createSwapchainKHR(createInfo);
 
   swapChainImages = device.getSwapchainImagesKHR(swapChain);
+  std::cerr << "swapChainImage Count: " << swapChainImages.size() << std::endl;
   swapChainImageFormat = surfaceFormat.format;
   swapChainExtent = extent;
 }
 
-void BaseRender::createImageViews() {
+void BaseRenderer::createImageViews() {
   swapChainImageViews.resize(swapChainImages.size());
   for (size_t i = 0; i < swapChainImages.size(); i++) {
     vk::ImageViewCreateInfo createInfo;
@@ -401,7 +414,7 @@ void BaseRender::createImageViews() {
   }
 }
 
-void BaseRender::createRenderPass() {
+void BaseRenderer::createRenderPass() {
   vk::AttachmentDescription colorAttachment;
   colorAttachment.setFormat(swapChainImageFormat);
   colorAttachment.setSamples(vk::SampleCountFlagBits::e1);
@@ -436,7 +449,7 @@ void BaseRender::createRenderPass() {
   renderPass = device.createRenderPass(createInfo);
 }
 
-void BaseRender::createGraphicsPipeline() {
+void BaseRenderer::createGraphicsPipeline() {
   auto vertShaderCode = myUtils::readBinaryFile("../glslShaders/build/vert.spv");
   auto fragShaderCode = myUtils::readBinaryFile("../glslShaders/build/frag.spv");
 
@@ -541,7 +554,7 @@ void BaseRender::createGraphicsPipeline() {
   device.destroyShaderModule(vertShaderModule);
 }
 
-void BaseRender::createFrameBuffers() {
+void BaseRenderer::createFrameBuffers() {
   swapChainFramebuffers.resize(swapChainImageViews.size());
   for (size_t i = 0; i < swapChainImageViews.size(); i++) {
     std::vector<vk::ImageView> attachments = { swapChainImageViews[i] };
@@ -557,7 +570,7 @@ void BaseRender::createFrameBuffers() {
   }
 }
 
-void BaseRender::createCommandPool() {
+void BaseRenderer::createCommandPool() {
   QueueFamilyIndices indices = HelperFunc::findQueueFamilies(physicalDevice, surface);
 
   vk::CommandPoolCreateInfo createInfo;
@@ -567,7 +580,7 @@ void BaseRender::createCommandPool() {
   commandPool = device.createCommandPool(createInfo);
 }
 
-void BaseRender::allocateCommandBuffers() {
+void BaseRenderer::allocateCommandBuffers() {
   commandBuffers.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
   
   vk::CommandBufferAllocateInfo allocInfo;
@@ -578,7 +591,7 @@ void BaseRender::allocateCommandBuffers() {
   commandBuffers = device.allocateCommandBuffers(allocInfo);
 }
 
-void BaseRender::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t imageIndex) {
+void BaseRenderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t imageIndex) {
   vk::CommandBufferBeginInfo beginInfo;
   beginInfo.setFlags(vk::CommandBufferUsageFlags(0));
   beginInfo.setPInheritanceInfo(nullptr);
@@ -624,8 +637,8 @@ void BaseRender::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t i
   commandBuffer.end();
 }
 
-void BaseRender::createSyncObjects() {
-  imageAvailbleSemaphores.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
+void BaseRenderer::createSyncObjects() {
+  imageAvailableSemaphores.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
   renderFinishedSemaphores.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
   inFlightFences.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
 
@@ -635,13 +648,13 @@ void BaseRender::createSyncObjects() {
   fenceInfo.setFlags(vk::FenceCreateFlagBits::eSignaled);
 
   for (size_t i = 0; i < globalTables::MAX_FRAMES_IN_FLIGHT; i++) {
-    imageAvailbleSemaphores[i] = device.createSemaphore(semaphoreInfo);
+    imageAvailableSemaphores[i] = device.createSemaphore(semaphoreInfo);
     renderFinishedSemaphores[i] = device.createSemaphore(semaphoreInfo);
     inFlightFences[i] = device.createFence(fenceInfo);
   }
 }
 
-void BaseRender::cleanupSwapChain() {
+void BaseRenderer::cleanupSwapChain() {
   device.waitIdle();
 
   for (size_t i = 0; i < swapChainFramebuffers.size(); i++) {
@@ -655,7 +668,7 @@ void BaseRender::cleanupSwapChain() {
   device.destroySwapchainKHR(swapChain);
 }
 
-void BaseRender::recreateSwapChain() {
+void BaseRenderer::recreateSwapChain() {
   int width = 0, height = 0;
   glfwGetFramebufferSize(window, &width, &height);
   while(width == 0 || height == 0) {

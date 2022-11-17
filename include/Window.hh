@@ -1,6 +1,6 @@
 #pragma once
 
-#include "render.hh"
+#include "BaseRenderer.hh"
 
 namespace myWindow{
   class MainWindow{
@@ -18,6 +18,6 @@ namespace myWindow{
   private:
     static MainWindow* _instance;
     GLFWwindow* window;
-    BaseRender render;
+    BaseRenderer render;
   };
 };
