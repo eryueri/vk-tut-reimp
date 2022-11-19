@@ -1,4 +1,4 @@
-#include "Utils.hh"
+#include "utils.hh"
 
 namespace myUtils {
   std::vector<char> readBinaryFile(const std::string& filename) {

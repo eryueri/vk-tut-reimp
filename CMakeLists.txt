@@ -9,7 +9,7 @@ set(IS_DEBUG_BUILD CMAKE_BUILD_TYPE STREQUAL "Debug")
 
 if (${IS_DEBUG_BUILD})
     add_compile_definitions(DEBUG)
-endif ()
+endif()
 
 include_directories(include/)
 

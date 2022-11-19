@@ -1,4 +1,4 @@
-#include "BaseRenderer.hh"
+#include "renderer.hh"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -12,7 +12,7 @@
 #include <set>
 #include <limits>
 
-#include "Utils.hh"
+#include "utils.hh"
 
 #ifdef DEBUG
   const bool enableValidationLayers = true;
@@ -35,7 +35,36 @@ namespace globalTables {
   const std::vector<const char*> deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
   };
+
+  const std::vector<Vertex> vertices = {
+    { {  0.0f, -0.5f }, { 0.6f, 0.3f, 0.8f } },
+    { {  0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f } },
+    { { -0.5f, -0.5f }, { 0.0f, 0.0f, 1.0f } },
+  };
 };
+
+vk::VertexInputBindingDescription Vertex::getBindingDescription() {
+  vk::VertexInputBindingDescription description{};
+  description.setBinding(0)
+             .setStride(sizeof(Vertex))
+             .setInputRate(vk::VertexInputRate::eVertex);
+
+  return description;
+}
+
+std::array<vk::VertexInputAttributeDescription, 2> Vertex::getAttributeDescriptions() {
+  std::array<vk::VertexInputAttributeDescription, 2> descriptions;
+  descriptions[0].setBinding(0)
+                 .setLocation(0)
+                 .setFormat(vk::Format::eR32G32Sfloat)
+                 .setOffset(offsetof(Vertex, pos));
+  descriptions[1].setBinding(0)
+                 .setLocation(1)
+                 .setFormat(vk::Format::eR32G32B32Sfloat)
+                 .setOffset(offsetof(Vertex, color));
+
+  return descriptions;
+}
 
 bool QueueFamilyIndices::isComplete() {
   return graphicsFamily.has_value() && presentFamily.has_value();
@@ -78,6 +107,16 @@ bool HelperFunc::isDeviceSuitable(vk::PhysicalDevice phyDevice, vk::SurfaceKHR s
   }
 
   return indices.isComplete() && extensionSupported && swapChainAdequate;
+}
+
+uint32_t HelperFunc::findMemType(uint32_t typeFilter, vk::MemoryPropertyFlags prop, const vk::PhysicalDevice& device) {
+  vk::PhysicalDeviceMemoryProperties memProp = device.getMemoryProperties();
+  for (uint32_t i = 0; i < memProp.memoryTypeCount; i++) {
+    if ((typeFilter & (1 << i)) && (memProp.memoryTypes[i].propertyFlags & prop) == prop) {
+        return i;
+    }
+  }
+  throw std::runtime_error("can not find proper mem type yo!");
 }
 
 QueueFamilyIndices HelperFunc::findQueueFamilies(vk::PhysicalDevice device, vk::SurfaceKHR surface) {
@@ -175,6 +214,7 @@ void BaseRenderer::init() {
   createFrameBuffers();
   createCommandPool();
   allocateCommandBuffers();
+  allocateVertexBuffer();
   createSyncObjects();
 }
 
@@ -245,6 +285,9 @@ void BaseRenderer::drawFrame() {
 
 void BaseRenderer::cleanup() {
   cleanupSwapChain();
+
+  device.destroyBuffer(vertexBuffer);
+  device.freeMemory(vertexBufferMem);
 
   device.destroyPipeline(graphicsPipeline);
   device.destroyPipelineLayout(pipelineLayout);
@@ -389,7 +432,6 @@ void BaseRenderer::createSwapChain() {
   swapChain = device.createSwapchainKHR(createInfo);
 
   swapChainImages = device.getSwapchainImagesKHR(swapChain);
-  std::cerr << "swapChainImage Count: " << swapChainImages.size() << std::endl;
   swapChainImageFormat = surfaceFormat.format;
   swapChainExtent = extent;
 }
@@ -469,6 +511,10 @@ void BaseRenderer::createGraphicsPipeline() {
   vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
 
   vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
+  const auto bindingDesc = Vertex::getBindingDescription();
+  const auto attribDesc = Vertex::getAttributeDescriptions();
+  vertexInputInfo.setVertexBindingDescriptions(bindingDesc)
+                 .setVertexAttributeDescriptions(attribDesc);
 
   vk::PipelineInputAssemblyStateCreateInfo inputAssembly;
   inputAssembly.setTopology(vk::PrimitiveTopology::eTriangleList);
@@ -580,6 +626,34 @@ void BaseRenderer::createCommandPool() {
   commandPool = device.createCommandPool(createInfo);
 }
 
+void BaseRenderer::allocateVertexBuffer() {
+  vk::BufferCreateInfo createInfo;
+  createInfo.setSize(sizeof(globalTables::vertices))
+            .setUsage(vk::BufferUsageFlagBits::eVertexBuffer)
+            .setSharingMode(vk::SharingMode::eExclusive);
+
+  vertexBuffer = device.createBuffer(createInfo);
+
+  vk::MemoryRequirements memRequirement = device.getBufferMemoryRequirements(vertexBuffer);
+
+  vk::MemoryAllocateInfo alloInfo;
+  alloInfo.setAllocationSize(memRequirement.size)
+          .setMemoryTypeIndex(HelperFunc::findMemType(memRequirement.memoryTypeBits, 
+                              vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, 
+                              physicalDevice));
+  vertexBufferMem = device.allocateMemory(alloInfo);
+
+  device.bindBufferMemory(vertexBuffer, vertexBufferMem, 0);
+
+  void* data;
+  auto result = device.mapMemory(vertexBufferMem, 0, createInfo.size, vk::MemoryMapFlags(0), &data);
+  if (result != vk::Result::eSuccess) {
+    throw std::runtime_error("i do not quiet know why i have to call constractor of vk::MemoryMapFlags instead of just use the number 0, and now it is throwing an error! HOW STUPID!");
+  }
+    memcpy(data, globalTables::vertices.data(), (size_t)createInfo.size);
+  device.unmapMemory(vertexBufferMem);
+}
+
 void BaseRenderer::allocateCommandBuffers() {
   commandBuffers.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
   
@@ -614,6 +688,11 @@ void BaseRenderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t
 
   commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
 
+  std::vector<vk::Buffer> vertexBuffers = { vertexBuffer };
+  std::vector<vk::DeviceSize> offsets = { 0 };
+
+  commandBuffer.bindVertexBuffers(0, 1, vertexBuffers.data(), offsets.data());
+
   vk::Viewport viewport;
   viewport.setX(0.0f);
   viewport.setY(0.0f);
@@ -630,7 +709,7 @@ void BaseRenderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t
   
   commandBuffer.setScissor(0, 1, &scissor);
 
-  commandBuffer.draw(3, 1, 0, 0);
+  commandBuffer.draw(static_cast<uint32_t>(globalTables::vertices.size()), 1, 0, 0);
 
   commandBuffer.endRenderPass();
 

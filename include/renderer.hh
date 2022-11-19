@@ -3,6 +3,7 @@
 #include <optional>
 
 #include <vulkan/vulkan.hpp>
+#include <glm/glm.hpp>
 
 struct GLFWwindow;
 
@@ -19,6 +20,14 @@ struct SwapChainSupportDetails {
   std::vector<vk::PresentModeKHR> presentModes;
 };
 
+struct Vertex {
+  glm::vec2 pos;
+  glm::vec3 color;
+
+  static vk::VertexInputBindingDescription getBindingDescription();
+  static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions();
+};
+
 namespace HelperFunc {
   bool validationLayerSupportChecked(const std::vector<const char*> validationLayers);
   bool deviceExtensionSupportChecked(vk::PhysicalDevice device, const std::vector<const char*> deviceExtension);
@@ -33,6 +42,8 @@ namespace HelperFunc {
   vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
   vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes);
   vk::Extent2D chooseSwapExtent(GLFWwindow* window, const vk::SurfaceCapabilitiesKHR& capabilities);
+
+  uint32_t findMemType(uint32_t typeFilter, vk::MemoryPropertyFlags prop, const vk::PhysicalDevice& device);
 };
 
 class BaseRenderer {
@@ -68,6 +79,9 @@ private:
   vk::PipelineLayout pipelineLayout;
   vk::Pipeline graphicsPipeline;
 
+  vk::Buffer vertexBuffer;
+  vk::DeviceMemory vertexBufferMem;
+
   vk::CommandPool commandPool;
   std::vector<vk::CommandBuffer> commandBuffers;
   std::vector<vk::Semaphore> imageAvailableSemaphores;
@@ -84,6 +98,7 @@ private:
   virtual void createGraphicsPipeline();
   virtual void createFrameBuffers();
   virtual void createCommandPool();
+  virtual void allocateVertexBuffer();
   virtual void allocateCommandBuffers();
   virtual void recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t iamgeIndex);
   virtual void createSyncObjects();

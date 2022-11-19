@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BaseRenderer.hh"
+#include "renderer.hh"
 
 namespace myWindow{
   class MainWindow{
