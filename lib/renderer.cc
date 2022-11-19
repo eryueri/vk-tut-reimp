@@ -37,9 +37,9 @@ namespace globalTables {
   };
 
   const std::vector<Vertex> vertices = {
-    { {  0.0f, -0.5f }, { 0.6f, 0.3f, 0.8f } },
+    { {  0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
     { {  0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f } },
-    { { -0.5f, -0.5f }, { 0.0f, 0.0f, 1.0f } },
+    { { -0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } },
   };
 };
 
@@ -628,7 +628,7 @@ void BaseRenderer::createCommandPool() {
 
 void BaseRenderer::allocateVertexBuffer() {
   vk::BufferCreateInfo createInfo;
-  createInfo.setSize(sizeof(globalTables::vertices))
+  createInfo.setSize(globalTables::vertices.size() * sizeof(globalTables::vertices[0]))
             .setUsage(vk::BufferUsageFlagBits::eVertexBuffer)
             .setSharingMode(vk::SharingMode::eExclusive);
 
