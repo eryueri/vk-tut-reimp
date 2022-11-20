@@ -3,6 +3,7 @@
 #include <optional>
 
 #include <vulkan/vulkan.hpp>
+#define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 
 struct GLFWwindow;
@@ -26,6 +27,12 @@ struct Vertex {
 
   static vk::VertexInputBindingDescription getBindingDescription();
   static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions();
+};
+
+struct UniformBufferObj {
+  glm::mat4 model;
+  glm::mat4 view;
+  glm::mat4 proj;
 };
 
 namespace HelperFunc {
@@ -79,6 +86,8 @@ private:
   std::vector<vk::Framebuffer> swapChainFramebuffers;
 
   vk::RenderPass renderPass;
+
+  vk::DescriptorSetLayout descriptorSetLayout;
   vk::PipelineLayout pipelineLayout;
   vk::Pipeline graphicsPipeline;
 
@@ -93,6 +102,13 @@ private:
   std::vector<vk::Semaphore> imageAvailableSemaphores;
   std::vector<vk::Semaphore> renderFinishedSemaphores;
   std::vector<vk::Fence> inFlightFences;
+
+  std::vector<vk::Buffer> uniformBuffers;
+  std::vector<vk::DeviceMemory> uniformMems;
+  std::vector<void*> uniformBuffersMapped;
+
+  vk::DescriptorPool descPool;
+  std::vector<vk::DescriptorSet> descriptorSets;
 private:
   virtual void createInstance();
   virtual void createSurface();
@@ -101,15 +117,21 @@ private:
   virtual void createSwapChain();
   virtual void createImageViews();
   virtual void createRenderPass();
+  virtual void createDescriptorSetLayout();
   virtual void createGraphicsPipeline();
   virtual void createFrameBuffers();
   virtual void createCommandPool();
   virtual void allocateCommandBuffers();
   virtual void allocateVertexBuffer();
   virtual void allocateIndexBuffer();
-  virtual void recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t iamgeIndex);
+  virtual void allocateUniformBuffers();
+  virtual void createDescriptorPool();
+  virtual void createDescriptorSets();
+  virtual void recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t iamgeIndex, uint32_t currentFrame);
   virtual void createSyncObjects();
 
   virtual void cleanupSwapChain();
   virtual void recreateSwapChain();
+
+  virtual void updateUniformBuffer(uint32_t currentFrame);
 };

@@ -3,7 +3,9 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <chrono>
 
 #include <iostream>
 #include <stdexcept>
@@ -273,12 +275,16 @@ void BaseRenderer::init() {
   createSwapChain();
   createImageViews();
   createRenderPass();
+  createDescriptorSetLayout();
   createGraphicsPipeline();
   createFrameBuffers();
   createCommandPool();
   allocateCommandBuffers();
   allocateVertexBuffer();
   allocateIndexBuffer();
+  allocateUniformBuffers();
+  createDescriptorPool();
+  createDescriptorSets();
   createSyncObjects();
 }
 
@@ -304,8 +310,10 @@ void BaseRenderer::drawFrame() {
       "error when reseting fence..."
       );
 
+  updateUniformBuffer(currentFrame);
+
   commandBuffers[currentFrame].reset();
-  recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
+  recordCommandBuffer(commandBuffers[currentFrame], imageIndex, currentFrame);
 
   vk::SubmitInfo submitInfo;
 
@@ -349,6 +357,15 @@ void BaseRenderer::drawFrame() {
 
 void BaseRenderer::cleanup() {
   cleanupSwapChain();
+
+  for (size_t i = 0; i < globalTables::MAX_FRAMES_IN_FLIGHT; i++) {
+    device.destroyBuffer(uniformBuffers[i]);
+    device.freeMemory(uniformMems[i]);
+  }
+
+  device.destroyDescriptorPool(descPool);
+
+  device.destroyDescriptorSetLayout(descriptorSetLayout);
 
   device.destroyBuffer(indexBuffer);
   device.freeMemory(indexBufferMem);
@@ -558,6 +575,19 @@ void BaseRenderer::createRenderPass() {
   renderPass = device.createRenderPass(createInfo);
 }
 
+void BaseRenderer::createDescriptorSetLayout() {
+  vk::DescriptorSetLayoutBinding uboDescLayoutBinding;
+  uboDescLayoutBinding.setBinding(0)
+                      .setStageFlags(vk::ShaderStageFlagBits::eVertex)
+                      .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+                      .setDescriptorCount(1);
+
+  vk::DescriptorSetLayoutCreateInfo createInfo{};
+  createInfo.setBindings(uboDescLayoutBinding);
+
+  descriptorSetLayout = device.createDescriptorSetLayout(createInfo);
+}
+
 void BaseRenderer::createGraphicsPipeline() {
   auto vertShaderCode = myUtils::readBinaryFile("../glslShaders/build/vert.spv");
   auto fragShaderCode = myUtils::readBinaryFile("../glslShaders/build/frag.spv");
@@ -617,7 +647,7 @@ void BaseRenderer::createGraphicsPipeline() {
   rasterizer.setPolygonMode(vk::PolygonMode::eFill);
   rasterizer.setLineWidth(1.0f);
   rasterizer.setCullMode(vk::CullModeFlagBits::eBack);
-  rasterizer.setFrontFace(vk::FrontFace::eClockwise);
+  rasterizer.setFrontFace(vk::FrontFace::eCounterClockwise);
   rasterizer.setDepthBiasEnable(VK_FALSE);
 
   vk::PipelineMultisampleStateCreateInfo multisampling;
@@ -638,6 +668,7 @@ void BaseRenderer::createGraphicsPipeline() {
   colorBlending.setAttachments(colorBlendAttachment);
 
   vk::PipelineLayoutCreateInfo pipelineLayoutInfo;
+  pipelineLayoutInfo.setSetLayouts(descriptorSetLayout);
 
   pipelineLayout = device.createPipelineLayout(pipelineLayoutInfo);
 
@@ -771,6 +802,65 @@ void BaseRenderer::allocateIndexBuffer() {
   device.freeMemory(stagingBufferMem);
 }
 
+void BaseRenderer::allocateUniformBuffers() {
+  vk::DeviceSize bufferSize = sizeof(UniformBufferObj);
+
+  uniformBuffers.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
+  uniformMems.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
+  uniformBuffersMapped.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
+
+  for (size_t i = 0; i < globalTables::MAX_FRAMES_IN_FLIGHT; i++) {
+    std::tie(uniformBuffers[i], uniformMems[i]) = HelperFunc::createBuffer(
+        bufferSize, 
+        vk::BufferUsageFlagBits::eUniformBuffer, 
+        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, 
+        device, 
+        physicalDevice);
+    auto result = device.mapMemory(uniformMems[i], 0, bufferSize, vk::MemoryMapFlags(0), &uniformBuffersMapped[i]);
+  }
+}
+
+void BaseRenderer::createDescriptorPool() {
+  vk::DescriptorPoolSize poolSize;
+  poolSize.setType(vk::DescriptorType::eUniformBuffer)
+          .setDescriptorCount(static_cast<uint32_t>(globalTables::MAX_FRAMES_IN_FLIGHT));
+
+  vk::DescriptorPoolCreateInfo createInfo;
+  createInfo.setPoolSizeCount(1)
+            .setPoolSizes(poolSize)
+            .setMaxSets(static_cast<uint32_t>(globalTables::MAX_FRAMES_IN_FLIGHT));
+
+  descPool = device.createDescriptorPool(createInfo);
+}
+
+void BaseRenderer::createDescriptorSets() {
+  std::vector<vk::DescriptorSetLayout> layouts(globalTables::MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
+  vk::DescriptorSetAllocateInfo allocInfo;
+  allocInfo.setDescriptorPool(descPool)
+           .setSetLayouts(layouts)
+           .setDescriptorSetCount(static_cast<uint32_t>(globalTables::MAX_FRAMES_IN_FLIGHT));
+
+  descriptorSets.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
+  descriptorSets = device.allocateDescriptorSets(allocInfo);
+
+  for (size_t i = 0; i < globalTables::MAX_FRAMES_IN_FLIGHT; i++) {
+    vk::DescriptorBufferInfo bufferInfo;
+    bufferInfo.setBuffer(uniformBuffers[i])
+              .setOffset(0)
+              .setRange(sizeof(UniformBufferObj));
+
+    vk::WriteDescriptorSet descriptorWrite;
+    descriptorWrite.setDstSet(descriptorSets[i])
+                   .setDstBinding(0)
+                   .setDstArrayElement(0)
+                   .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+                   .setDescriptorCount(1)
+                   .setBufferInfo(bufferInfo);
+
+    device.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+  }
+}
+
 void BaseRenderer::allocateCommandBuffers() {
   commandBuffers.resize(globalTables::MAX_FRAMES_IN_FLIGHT);
   
@@ -782,7 +872,7 @@ void BaseRenderer::allocateCommandBuffers() {
   commandBuffers = device.allocateCommandBuffers(allocInfo);
 }
 
-void BaseRenderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t imageIndex) {
+void BaseRenderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t imageIndex, uint32_t currentFrame) {
   vk::CommandBufferBeginInfo beginInfo;
   beginInfo.setFlags(vk::CommandBufferUsageFlags(0));
   beginInfo.setPInheritanceInfo(nullptr);
@@ -827,6 +917,7 @@ void BaseRenderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t
   
   commandBuffer.setScissor(0, 1, &scissor);
 
+  commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
   commandBuffer.drawIndexed(static_cast<uint32_t>(globalTables::indices.size()), 1, 0, 0, 0);
 
   commandBuffer.endRenderPass();
@@ -878,4 +969,17 @@ void BaseRenderer::recreateSwapChain() {
   createSwapChain();
   createImageViews();
   createFrameBuffers();
+}
+
+void BaseRenderer::updateUniformBuffer(uint32_t currentFrame) {
+ static auto startTime = std::chrono::high_resolution_clock::now();
+
+ auto currentTime = std::chrono::high_resolution_clock::now();
+ float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+ UniformBufferObj ubo{};
+ ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+ ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+ ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
+ ubo.proj[1][1] *= -1;
+ memcpy(uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
 }
