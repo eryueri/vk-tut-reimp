@@ -25,6 +25,11 @@
     throw std::runtime_error(#message); \
   }
 
+#define CHECK_NULL(expr) \
+    if (!(expr)) { \
+      throw std::runtime_error(#expr " is nullptr..."); \
+    }
+
 namespace globalTables {
   static const uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -37,9 +42,14 @@ namespace globalTables {
   };
 
   const std::vector<Vertex> vertices = {
-    { {  0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
-    { {  0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f } },
-    { { -0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } },
+    { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+    { {  0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
+    { {  0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } },
+    { { -0.5f,  0.5f }, { 1.0f, 0.0f, 1.0f } },
+  };
+
+  const std::vector<uint16_t> indices = {
+    0, 1, 2, 2, 3, 0
   };
 };
 
@@ -194,6 +204,59 @@ vk::Extent2D HelperFunc::chooseSwapExtent(GLFWwindow* window, const vk::SurfaceC
   }
 }
 
+std::tuple<vk::Buffer, vk::DeviceMemory> HelperFunc::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memProp, 
+    vk::Device device, vk::PhysicalDevice physicalDevice) {
+  vk::Buffer buffer;
+  vk::DeviceMemory bufferMem;
+  vk::BufferCreateInfo createInfo;
+  createInfo.setSize(size)
+            .setUsage(usage)
+            .setSharingMode(vk::SharingMode::eExclusive);
+
+  buffer = device.createBuffer(createInfo);
+
+  vk::MemoryRequirements memRequirement = device.getBufferMemoryRequirements(buffer);
+
+  vk::MemoryAllocateInfo alloInfo;
+  alloInfo.setAllocationSize(memRequirement.size)
+          .setMemoryTypeIndex(HelperFunc::findMemType(memRequirement.memoryTypeBits, 
+                              memProp,
+                              physicalDevice));
+  bufferMem = device.allocateMemory(alloInfo);
+
+  device.bindBufferMemory(buffer, bufferMem, 0);
+
+  return std::tuple(buffer, bufferMem);
+}
+
+void HelperFunc::copyBuffer(vk::Buffer src, vk::Buffer dst, vk::DeviceSize size, vk::CommandPool commandPool, vk::Device device, vk::Queue queue) {
+  vk::CommandBufferAllocateInfo allocInfo;
+  allocInfo.setCommandBufferCount(1)
+           .setCommandPool(commandPool)
+           .setLevel(vk::CommandBufferLevel::ePrimary);
+
+  vk::CommandBuffer cmdBuffer = device.allocateCommandBuffers(allocInfo)[0];
+
+  vk::BufferCopy copyRegion{};
+  copyRegion.setDstOffset(0)
+            .setSrcOffset(0)
+            .setSize(size);
+
+  vk::CommandBufferBeginInfo beginInfo;
+  beginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+
+  cmdBuffer.begin(beginInfo);
+    cmdBuffer.copyBuffer(src, dst, copyRegion);
+  cmdBuffer.end();
+
+  vk::SubmitInfo submitInfo;
+  submitInfo.setCommandBuffers(cmdBuffer);
+
+  queue.submit(submitInfo);
+  queue.waitIdle();
+  device.freeCommandBuffers(commandPool, 1, &cmdBuffer);
+}
+
 BaseRenderer::BaseRenderer() {}
 
 BaseRenderer::~BaseRenderer() {}
@@ -215,6 +278,7 @@ void BaseRenderer::init() {
   createCommandPool();
   allocateCommandBuffers();
   allocateVertexBuffer();
+  allocateIndexBuffer();
   createSyncObjects();
 }
 
@@ -285,6 +349,9 @@ void BaseRenderer::drawFrame() {
 
 void BaseRenderer::cleanup() {
   cleanupSwapChain();
+
+  device.destroyBuffer(indexBuffer);
+  device.freeMemory(indexBufferMem);
 
   device.destroyBuffer(vertexBuffer);
   device.freeMemory(vertexBufferMem);
@@ -627,31 +694,81 @@ void BaseRenderer::createCommandPool() {
 }
 
 void BaseRenderer::allocateVertexBuffer() {
-  vk::BufferCreateInfo createInfo;
-  createInfo.setSize(globalTables::vertices.size() * sizeof(globalTables::vertices[0]))
-            .setUsage(vk::BufferUsageFlagBits::eVertexBuffer)
-            .setSharingMode(vk::SharingMode::eExclusive);
+  vk::DeviceSize bufferSize = sizeof(Vertex) * globalTables::vertices.size();
 
-  vertexBuffer = device.createBuffer(createInfo);
+  vk::Buffer stagingBuffer;
+  vk::DeviceMemory stagingBufferMem;
 
-  vk::MemoryRequirements memRequirement = device.getBufferMemoryRequirements(vertexBuffer);
-
-  vk::MemoryAllocateInfo alloInfo;
-  alloInfo.setAllocationSize(memRequirement.size)
-          .setMemoryTypeIndex(HelperFunc::findMemType(memRequirement.memoryTypeBits, 
-                              vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, 
-                              physicalDevice));
-  vertexBufferMem = device.allocateMemory(alloInfo);
-
-  device.bindBufferMemory(vertexBuffer, vertexBufferMem, 0);
+  std::tie(stagingBuffer, stagingBufferMem) = HelperFunc::createBuffer(
+      bufferSize, 
+      vk::BufferUsageFlagBits::eTransferSrc, 
+      vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, 
+      device, 
+      physicalDevice
+      );
 
   void* data;
-  auto result = device.mapMemory(vertexBufferMem, 0, createInfo.size, vk::MemoryMapFlags(0), &data);
+  auto result = device.mapMemory(stagingBufferMem, 0, bufferSize, vk::MemoryMapFlags(0), &data);
   if (result != vk::Result::eSuccess) {
     throw std::runtime_error("i do not quiet know why i have to call constractor of vk::MemoryMapFlags instead of just use the number 0, and now it is throwing an error! HOW STUPID!");
   }
-    memcpy(data, globalTables::vertices.data(), (size_t)createInfo.size);
-  device.unmapMemory(vertexBufferMem);
+    memcpy(data, globalTables::vertices.data(), bufferSize);
+  device.unmapMemory(stagingBufferMem);
+
+  std::tie(vertexBuffer, vertexBufferMem) = HelperFunc::createBuffer(
+      bufferSize, 
+      vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst, 
+      vk::MemoryPropertyFlagBits::eDeviceLocal, 
+      device, 
+      physicalDevice);
+
+  HelperFunc::copyBuffer(
+      stagingBuffer, 
+      vertexBuffer, 
+      bufferSize, 
+      commandPool, 
+      device, 
+      graphicQueue);
+  device.destroyBuffer(stagingBuffer);
+  device.freeMemory(stagingBufferMem);
+}
+
+void BaseRenderer::allocateIndexBuffer() {
+  vk::DeviceSize bufferSize = sizeof(uint16_t) * globalTables::indices.size();
+
+  vk::Buffer stagingBuffer;
+  vk::DeviceMemory stagingBufferMem;
+
+  std::tie(stagingBuffer, stagingBufferMem) = HelperFunc::createBuffer(
+      bufferSize, 
+      vk::BufferUsageFlagBits::eTransferSrc, 
+      vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, 
+      device, 
+      physicalDevice
+      );
+
+  void* data;
+  auto result = device.mapMemory(stagingBufferMem, 0, bufferSize, vk::MemoryMapFlags(0), &data);
+    memcpy(data, globalTables::indices.data(), bufferSize);
+  device.unmapMemory(stagingBufferMem);
+
+  std::tie(indexBuffer, indexBufferMem) = HelperFunc::createBuffer(
+      bufferSize, 
+      vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst, 
+      vk::MemoryPropertyFlagBits::eDeviceLocal, 
+      device, 
+      physicalDevice);
+
+  HelperFunc::copyBuffer(
+      stagingBuffer, 
+      indexBuffer, 
+      bufferSize, 
+      commandPool, 
+      device, 
+      graphicQueue);
+
+  device.destroyBuffer(stagingBuffer);
+  device.freeMemory(stagingBufferMem);
 }
 
 void BaseRenderer::allocateCommandBuffers() {
@@ -692,6 +809,7 @@ void BaseRenderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t
   std::vector<vk::DeviceSize> offsets = { 0 };
 
   commandBuffer.bindVertexBuffers(0, 1, vertexBuffers.data(), offsets.data());
+  commandBuffer.bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint16);
 
   vk::Viewport viewport;
   viewport.setX(0.0f);
@@ -709,7 +827,7 @@ void BaseRenderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t
   
   commandBuffer.setScissor(0, 1, &scissor);
 
-  commandBuffer.draw(static_cast<uint32_t>(globalTables::vertices.size()), 1, 0, 0);
+  commandBuffer.drawIndexed(static_cast<uint32_t>(globalTables::indices.size()), 1, 0, 0, 0);
 
   commandBuffer.endRenderPass();
 

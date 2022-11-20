@@ -44,6 +44,9 @@ namespace HelperFunc {
   vk::Extent2D chooseSwapExtent(GLFWwindow* window, const vk::SurfaceCapabilitiesKHR& capabilities);
 
   uint32_t findMemType(uint32_t typeFilter, vk::MemoryPropertyFlags prop, const vk::PhysicalDevice& device);
+  
+  std::tuple<vk::Buffer, vk::DeviceMemory> createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memProp, vk::Device device, vk::PhysicalDevice physicalDevice);
+  void copyBuffer(vk::Buffer src, vk::Buffer dst, vk::DeviceSize size, vk::CommandPool commandPool, vk::Device device, vk::Queue queue);
 };
 
 class BaseRenderer {
@@ -82,6 +85,9 @@ private:
   vk::Buffer vertexBuffer;
   vk::DeviceMemory vertexBufferMem;
 
+  vk::Buffer indexBuffer;
+  vk::DeviceMemory indexBufferMem;
+
   vk::CommandPool commandPool;
   std::vector<vk::CommandBuffer> commandBuffers;
   std::vector<vk::Semaphore> imageAvailableSemaphores;
@@ -98,8 +104,9 @@ private:
   virtual void createGraphicsPipeline();
   virtual void createFrameBuffers();
   virtual void createCommandPool();
-  virtual void allocateVertexBuffer();
   virtual void allocateCommandBuffers();
+  virtual void allocateVertexBuffer();
+  virtual void allocateIndexBuffer();
   virtual void recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t iamgeIndex);
   virtual void createSyncObjects();
 
