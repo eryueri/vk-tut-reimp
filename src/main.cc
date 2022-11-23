@@ -1,4 +1,4 @@
-#include "window.hh"
+#include "app.hh"
 #include <iostream>
 
 int main() {

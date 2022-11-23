@@ -3,6 +3,8 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include "renderer.hh"
+
 static const uint32_t WIDTH = 800;
 static const uint32_t HEIGHT = 600;
 
@@ -22,12 +24,14 @@ namespace myWindow {
     cleanup();
   }
   void MainWindow::init() {
+    render = new BaseRenderer;
+
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     window = glfwCreateWindow(WIDTH, HEIGHT, "vulkan-reimp", nullptr, nullptr);
-    render.connectWindow(window);
-    render.init();
+    render->connectWindow(window);
+    render->init();
     
     glfwSetWindowUserPointer(window, &render);
 
@@ -37,11 +41,11 @@ namespace myWindow {
   void MainWindow::mainLoop() {
     while(!glfwWindowShouldClose(window)) {
       glfwPollEvents();
-      render.drawFrame();
+      render->drawFrame();
     }
   }
   void MainWindow::cleanup() {
-    render.cleanup();
+    render->cleanup();
     glfwDestroyWindow(window);
     glfwTerminate();
   }

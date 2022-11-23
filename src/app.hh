@@ -1,7 +1,10 @@
 #pragma once
 
-class BaseRenderer;
 class GLFWwindow;
+
+class VertexRenderer;
+class VulkanInstance;
+class RenderAssets;
 
 namespace myWindow{
   class MainWindow{
@@ -18,7 +21,9 @@ namespace myWindow{
     static void framebufferResizeCallBack(GLFWwindow* window, int width, int height);
   private:
     static MainWindow* _instance;
-    GLFWwindow* window;
-    BaseRenderer* render;
+    GLFWwindow* _window;
+    VertexRenderer* _renderer;
+    VulkanInstance* _vkInstance;
+    RenderAssets* _assets;
   };
 };
