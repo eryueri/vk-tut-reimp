@@ -41,7 +41,7 @@ public:
 private:
   GLFWwindow* _window = nullptr;
 private:
-  bool _enableValidationLayers = false;
+  bool _enableValidationLayers = true;
   bool _frameBufferResized = false;
   uint32_t _currentFrame = 0;
   QueueFamilyIndices* _queueIndices = nullptr;
@@ -91,6 +91,7 @@ private:
   void createSyncObjects();
 private:
   void cleanupSwapChain();
+  void cleanupRenderPass();
   void cleanupSyncObjects();
   void cleanupCommandPool();
   void cleanupLogicalDevice();

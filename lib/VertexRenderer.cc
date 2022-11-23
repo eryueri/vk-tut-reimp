@@ -35,14 +35,13 @@ void VertexRenderer::drawFrame() {
 
   _instance->waitForFence();
 
-  vk::CommandBuffer commandBuffer = _instance->getCommandBufferBegin();
-  {
+  vk::CommandBuffer commandBuffer = _instance->getCommandBufferBegin(); {
     vk::Extent2D swapChainExtent = _instance->getSwapChainExtent();
 
     vk::RenderPassBeginInfo renderPassInfo;
     renderPassInfo.setRenderPass(_instance->getRenderPass());
     renderPassInfo.setFramebuffer(_instance->getFramebuffer(imageIndex));
-    renderPassInfo.setRenderArea( // SUS
+    renderPassInfo.setRenderArea(
         vk::Rect2D(
             {0, 0},
             swapChainExtent
@@ -82,8 +81,7 @@ void VertexRenderer::drawFrame() {
     commandBuffer.drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
     commandBuffer.endRenderPass();
-  }
-  _instance->getCommandBufferEnd();
+  } _instance->getCommandBufferEnd();
 
   _instance->applyGraphicsQueue();
 
@@ -143,7 +141,7 @@ void VertexRenderer::allocateIndexBuffer() {
       _device.mapMemory(stagingMemory, 0, bufferSize, vk::MemoryMapFlags(0), &data) != vk::Result::eSuccess,
       failed to map memory
       );
-    memcpy(data, vertices.data(), bufferSize);
+    memcpy(data, indices.data(), bufferSize);
   _device.unmapMemory(stagingMemory);
 
   _assets->storeBuffer(stagingBuffer, _indexIndex.value(), bufferSize);
@@ -151,3 +149,7 @@ void VertexRenderer::allocateIndexBuffer() {
   _device.destroyBuffer(stagingBuffer);
   _device.freeMemory(stagingMemory);
 }
+
+// void VertexRenderer::allocateUniformBuffers() {
+//
+// }

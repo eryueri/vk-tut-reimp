@@ -10,7 +10,6 @@ public:
   ~RenderAssets() = default;
   void init(VulkanInstance* instance);
   void cleanup();
-  void setInstance(VulkanInstance* instance);
 public:
   vk::Pipeline getGraphicsPipeline() const;
   vk::PipelineLayout getGraphicsPipelineLayout() const;
@@ -52,6 +51,7 @@ private:
   void createDescriptorPool();
   void createDescriptorSets();
 private:
+  void cleanupGraphicsPipelineLayout();
   void cleanupGraphicsPipeline();
   void cleanupBufferMemory();
 };

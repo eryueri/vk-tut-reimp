@@ -15,6 +15,7 @@
 void RenderAssets::init(VulkanInstance* instance) {
   _instance = instance;
   _device = _instance->getLogicalDevice();
+  _gpu = _instance->getGPU();
   _graphicsQueue = _instance->getGraphicsQueue();
   _commandPool = _instance->getCommandPool();
 
@@ -22,8 +23,14 @@ void RenderAssets::init(VulkanInstance* instance) {
 }
 
 void RenderAssets::cleanup() {
+  _device.waitIdle();
   cleanupBufferMemory();
   cleanupGraphicsPipeline();
+  cleanupGraphicsPipelineLayout();
+}
+
+void RenderAssets::cleanupGraphicsPipelineLayout() {
+  _device.destroyPipelineLayout(_graphicsPipelineLayout);
 }
 
 void RenderAssets::cleanupGraphicsPipeline() {
@@ -37,6 +44,7 @@ void RenderAssets::cleanupBufferMemory() {
     } catch (std::out_of_range& e) {
       _device.destroyBuffer(_buffers.at(i));
       _device.freeMemory(_memories.at(i));
+      continue;
       // _buffers.erase(i);
       // _memories.erase(i);
     }
@@ -47,10 +55,6 @@ void RenderAssets::cleanupBufferMemory() {
     // _memories.erase(i);
     // _memoriesMapped.erase(i);
   }
-}
-
-void RenderAssets::setInstance(VulkanInstance* instance) {
-  _instance = instance;
 }
 
 vk::Pipeline RenderAssets::getGraphicsPipeline() const {
@@ -78,7 +82,7 @@ uint32_t RenderAssets::createBuffer(vk::DeviceSize size,
             .setUsage(usage)
             .setSharingMode(vk::SharingMode::eExclusive);
 
-  _buffers.at(_index) = _device.createBuffer(bufferInfo);
+  _buffers[_index] = _device.createBuffer(bufferInfo);
 
   vk::MemoryRequirements memRequirement = _device.getBufferMemoryRequirements(_buffers.at(_index));
 
@@ -89,7 +93,7 @@ uint32_t RenderAssets::createBuffer(vk::DeviceSize size,
                   memoryProp, 
                   _gpu));
 
-  _memories.at(_index) = _device.allocateMemory(memoryInfo);
+  _memories[_index] = _device.allocateMemory(memoryInfo);
 
   _device.bindBufferMemory(_buffers.at(_index), _memories.at(_index), 0);
 
@@ -198,7 +202,7 @@ void RenderAssets::createGraphicsPipeline() {
   rasterizer.setPolygonMode(vk::PolygonMode::eFill);
   rasterizer.setLineWidth(1.0f);
   rasterizer.setCullMode(vk::CullModeFlagBits::eBack);
-  rasterizer.setFrontFace(vk::FrontFace::eCounterClockwise);
+  rasterizer.setFrontFace(vk::FrontFace::eClockwise);
   rasterizer.setDepthBiasEnable(VK_FALSE);
 
   vk::PipelineMultisampleStateCreateInfo multisampling;
@@ -219,9 +223,12 @@ void RenderAssets::createGraphicsPipeline() {
   colorBlending.setAttachments(colorBlendAttachment);
 
   vk::PipelineLayoutCreateInfo pipelineLayoutInfo;
-  pipelineLayoutInfo.setSetLayouts(_descriptorSetLayout);
+  // pipelineLayoutInfo.setSetLayouts(_descriptorSetLayout);
 
   _graphicsPipelineLayout = _device.createPipelineLayout(pipelineLayoutInfo);
+  CHECK_NULL(_graphicsPipelineLayout);
+
+  vk::RenderPass renderPass = _instance->getRenderPass();
 
   vk::GraphicsPipelineCreateInfo pipelineInfo;
   pipelineInfo.setStages(shaderStages);
@@ -233,7 +240,7 @@ void RenderAssets::createGraphicsPipeline() {
   pipelineInfo.setPColorBlendState(&colorBlending);
   pipelineInfo.setPDynamicState(&dynamicState);
   pipelineInfo.setLayout(_graphicsPipelineLayout);
-  pipelineInfo.setRenderPass(_instance->getRenderPass());
+  pipelineInfo.setRenderPass(renderPass);
   pipelineInfo.setSubpass(0);
 
   vk::Result result;

@@ -21,7 +21,7 @@ const std::vector<const char*> validationLayers = {
 };
 
 const std::vector<const char*> deviceExtensions = {
-  "VK_KHR_swapChain"
+  VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
 VulkanInstance::~VulkanInstance() {
@@ -35,6 +35,8 @@ void VulkanInstance::init() {
   createLogicalDevice();
   createSwapChain();
   createImageViews();
+  createRenderPass();
+  createFrameBuffers();
   createCommandPool();
   allocateCommandBuffers();
   createSyncObjects();
@@ -42,6 +44,7 @@ void VulkanInstance::init() {
 
 void VulkanInstance::cleanup() {
   cleanupSwapChain();
+  cleanupRenderPass();
   cleanupSyncObjects();
   cleanupCommandPool();
   cleanupLogicalDevice();
@@ -198,7 +201,7 @@ void VulkanInstance::applyPresentQueue(uint32_t imageIndex) {
   std::vector<vk::SwapchainKHR> swapChains = { _swapChain };
 
   presentInfo.setSwapchains(swapChains)
-             .setImageIndices(imageIndex);
+             .setPImageIndices(&imageIndex);
 
   result = _presentQueue.presentKHR(presentInfo);
 
@@ -245,13 +248,13 @@ void VulkanInstance::createInstance() {
 }
 
 void VulkanInstance::createSurface() {
-  VkSurfaceKHR _surface;
-  VkResult result = glfwCreateWindowSurface(static_cast<VkInstance>(_instance), _window, nullptr, &_surface);
+  VkSurfaceKHR surface;
+  VkResult result = glfwCreateWindowSurface(static_cast<VkInstance>(_instance), _window, nullptr, &surface);
   IF_THROW(
       result != VK_SUCCESS,
       failed to create surface...
       );
-  _surface = vk::SurfaceKHR(_surface);
+  _surface = vk::SurfaceKHR(surface);
   CHECK_NULL(_surface);
 }
 
@@ -462,6 +465,10 @@ void VulkanInstance::cleanupSwapChain() {
   }
 
   _device.destroySwapchainKHR(_swapChain);
+}
+
+void VulkanInstance::cleanupRenderPass() {
+  _device.destroyRenderPass(_renderPass);
 }
 
 void VulkanInstance::cleanupSyncObjects() {

@@ -1,5 +1,8 @@
 #include "app.hh"
 
+#include <iostream>
+#include <time.h>
+
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
@@ -35,8 +38,8 @@ namespace myWindow {
     _assets = new RenderAssets;
     _renderer = new VertexRenderer;
 
-    _vkInstance->init();
     _vkInstance->setWindow(_window);
+    _vkInstance->init();
     _assets->init(_vkInstance);
     _renderer->init(_vkInstance, _assets);
     
