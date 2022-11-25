@@ -12,6 +12,7 @@ if (${IS_DEBUG_BUILD})
 endif()
 
 include_directories(include/)
+include_directories(deps/)
 
 aux_source_directory(./lib LIB_FILES)
 aux_source_directory(./src SOURCE_FILES)
