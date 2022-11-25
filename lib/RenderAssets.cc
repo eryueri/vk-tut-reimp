@@ -19,14 +19,26 @@ void RenderAssets::init(VulkanInstance* instance) {
   _graphicsQueue = _instance->getGraphicsQueue();
   _commandPool = _instance->getCommandPool();
 
+  createDescriptorSetLayout();
   createGraphicsPipeline();
+  createDescriptorPool();
 }
 
 void RenderAssets::cleanup() {
   _device.waitIdle();
   cleanupBufferMemory();
+  cleanupDescriptorPool();
+  cleanupDescriptorSetLayout();
   cleanupGraphicsPipeline();
   cleanupGraphicsPipelineLayout();
+}
+
+void RenderAssets::cleanupDescriptorPool() {
+  _device.destroyDescriptorPool(_descriptorPool);
+}
+
+void RenderAssets::cleanupDescriptorSetLayout() {
+  _device.destroyDescriptorSetLayout(_descriptorSetLayout);
 }
 
 void RenderAssets::cleanupGraphicsPipelineLayout() {
@@ -39,21 +51,8 @@ void RenderAssets::cleanupGraphicsPipeline() {
 
 void RenderAssets::cleanupBufferMemory() {
   for (uint32_t i = 0; i < _index; i++) {
-    try{
-      _memoriesMapped.at(i);
-    } catch (std::out_of_range& e) {
-      _device.destroyBuffer(_buffers.at(i));
-      _device.freeMemory(_memories.at(i));
-      continue;
-      // _buffers.erase(i);
-      // _memories.erase(i);
-    }
-    _device.unmapMemory(_memories.at(i));
     _device.destroyBuffer(_buffers.at(i));
     _device.freeMemory(_memories.at(i));
-    // _buffers.erase(i);
-    // _memories.erase(i);
-    // _memoriesMapped.erase(i);
   }
 }
 
@@ -65,12 +64,16 @@ vk::PipelineLayout RenderAssets::getGraphicsPipelineLayout() const {
   return _graphicsPipelineLayout;
 }
 
-vk::Buffer RenderAssets::getBuffer(uint32_t index) const {
-  return _buffers.at(index);
+vk::DescriptorPool RenderAssets::getDescriptorPool() const {
+  return _descriptorPool;
 }
 
-void* RenderAssets::getMemoryMap(uint32_t index) const {
-  return _memoriesMapped.at(index);
+vk::DescriptorSetLayout RenderAssets::getDescriptorSetLayout() const {
+  return _descriptorSetLayout;
+}
+
+vk::Buffer RenderAssets::getBuffer(uint32_t index) const {
+  return _buffers.at(index);
 }
 
 uint32_t RenderAssets::createBuffer(vk::DeviceSize size, 
@@ -98,6 +101,13 @@ uint32_t RenderAssets::createBuffer(vk::DeviceSize size,
   _device.bindBufferMemory(_buffers.at(_index), _memories.at(_index), 0);
 
   return _index++;
+}
+
+void RenderAssets::mapMemory(uint32_t index, vk::DeviceSize size, void** mem) {
+  IF_THROW(
+      _device.mapMemory(_memories.at(index), 0, size, vk::MemoryMapFlags(0), mem) != vk::Result::eSuccess, 
+      trouble mapping memory
+      );
 }
 
 void RenderAssets::storeBuffer(vk::Buffer src, uint32_t dst, vk::DeviceSize size) {
@@ -136,7 +146,8 @@ void RenderAssets::createDescriptorSetLayout() {
                       .setDescriptorCount(1);
 
   vk::DescriptorSetLayoutCreateInfo createInfo{};
-  createInfo.setBindings(uboDescLayoutBinding);
+  createInfo.setBindings(uboDescLayoutBinding)
+            .setBindingCount(1);
 
   _descriptorSetLayout = _device.createDescriptorSetLayout(createInfo);
 }
@@ -202,7 +213,7 @@ void RenderAssets::createGraphicsPipeline() {
   rasterizer.setPolygonMode(vk::PolygonMode::eFill);
   rasterizer.setLineWidth(1.0f);
   rasterizer.setCullMode(vk::CullModeFlagBits::eBack);
-  rasterizer.setFrontFace(vk::FrontFace::eClockwise);
+  rasterizer.setFrontFace(vk::FrontFace::eCounterClockwise);
   rasterizer.setDepthBiasEnable(VK_FALSE);
 
   vk::PipelineMultisampleStateCreateInfo multisampling;
@@ -223,7 +234,7 @@ void RenderAssets::createGraphicsPipeline() {
   colorBlending.setAttachments(colorBlendAttachment);
 
   vk::PipelineLayoutCreateInfo pipelineLayoutInfo;
-  // pipelineLayoutInfo.setSetLayouts(_descriptorSetLayout);
+  pipelineLayoutInfo.setSetLayouts(_descriptorSetLayout);
 
   _graphicsPipelineLayout = _device.createPipelineLayout(pipelineLayoutInfo);
   CHECK_NULL(_graphicsPipelineLayout);
@@ -269,30 +280,3 @@ void RenderAssets::createDescriptorPool() {
   _descriptorPool = _device.createDescriptorPool(createInfo);
 }
 
-void RenderAssets::createDescriptorSets() {
-  std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, _descriptorSetLayout);
-  vk::DescriptorSetAllocateInfo allocInfo;
-  allocInfo.setDescriptorPool(_descriptorPool)
-           .setSetLayouts(layouts)
-           .setDescriptorSetCount(static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT));
-
-  descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-  descriptorSets = _device.allocateDescriptorSets(allocInfo);
-
-  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-    vk::DescriptorBufferInfo bufferInfo;
-    // bufferInfo.setBuffer(uniformBuffers[i])
-    //           .setOffset(0)
-    //           .setRange(sizeof(UniformBufferObj));
-
-    vk::WriteDescriptorSet descriptorWrite;
-    descriptorWrite.setDstSet(descriptorSets[i])
-                   .setDstBinding(0)
-                   .setDstArrayElement(0)
-                   .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-                   .setDescriptorCount(1)
-                   .setBufferInfo(bufferInfo);
-
-    _device.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
-  }
-}

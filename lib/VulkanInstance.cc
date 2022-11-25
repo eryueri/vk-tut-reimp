@@ -53,7 +53,7 @@ void VulkanInstance::cleanup() {
 }
 
 void VulkanInstance::currentFrameInc() {
-  _currentFrame = ++_currentFrame % MAX_FRAMES_IN_FLIGHT;
+  _currentFrame = (_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
 void VulkanInstance::setWindow(GLFWwindow* w) {

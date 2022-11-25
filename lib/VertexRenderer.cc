@@ -1,5 +1,8 @@
 #include "VertexRenderer.hh"
 
+#include <chrono>
+#define GLM_FORCE_RADIANS
+#include <glm/gtc/matrix_transform.hpp>
 
 #include "VulkanInstance.hh"
 #include "RenderAssets.hh"
@@ -27,6 +30,8 @@ void VertexRenderer::init(VulkanInstance* instance, RenderAssets* assets) {
 
   allocateVertexBuffer();
   allocateIndexBuffer();
+  allocateUniformBuffer();
+  updateDescriptorSets();
 }
 
 void VertexRenderer::drawFrame() {
@@ -34,6 +39,8 @@ void VertexRenderer::drawFrame() {
   uint32_t imageIndex = _instance->acquireImage();
 
   _instance->waitForFence();
+
+  updateUniformBuffer(currentFrame);
 
   vk::CommandBuffer commandBuffer = _instance->getCommandBufferBegin(); {
     vk::Extent2D swapChainExtent = _instance->getSwapChainExtent();
@@ -77,7 +84,7 @@ void VertexRenderer::drawFrame() {
 
     commandBuffer.setScissor(0, 1, &scissor);
 
-    // commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _assets->getGraphicsPipelineLayout(), 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _assets->getGraphicsPipelineLayout(), 0, 1, &_descriptorSets[currentFrame], 0, nullptr);
     commandBuffer.drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
     commandBuffer.endRenderPass();
@@ -150,6 +157,56 @@ void VertexRenderer::allocateIndexBuffer() {
   _device.freeMemory(stagingMemory);
 }
 
-// void VertexRenderer::allocateUniformBuffers() {
-//
-// }
+void VertexRenderer::allocateUniformBuffer() {
+  vk::DeviceSize bufferSize = sizeof(UniformBufferObject) * MAX_FRAMES_IN_FLIGHT;
+
+  _uniformIndex = _assets->createBuffer(
+      bufferSize, 
+      vk::BufferUsageFlagBits::eUniformBuffer,
+      vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+
+  _assets->mapMemory(_uniformIndex.value(), bufferSize, &_data);
+}
+
+void VertexRenderer::updateDescriptorSets() {
+  std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, _assets->getDescriptorSetLayout());
+  vk::DescriptorSetAllocateInfo allocInfo;
+  allocInfo.setDescriptorPool(_assets->getDescriptorPool())
+           .setSetLayouts(layouts)
+           .setDescriptorSetCount(static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT));
+
+  _descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+  _descriptorSets = _device.allocateDescriptorSets(allocInfo);
+
+  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+    vk::DescriptorBufferInfo bufferInfo;
+    bufferInfo.setBuffer(_assets->getBuffer(_uniformIndex.value()))
+              .setOffset(0 + i * sizeof(UniformBufferObject))
+              .setRange(sizeof(UniformBufferObject));
+
+    vk::WriteDescriptorSet descriptorWrite;
+    descriptorWrite.setDstSet(_descriptorSets[i])
+                   .setDstBinding(0)
+                   .setDstArrayElement(0)
+                   .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+                   .setDescriptorCount(1)
+                   .setBufferInfo(bufferInfo);
+
+    _device.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+  }
+}
+
+void VertexRenderer::updateUniformBuffer(uint32_t currentFrame) {
+  static auto startTime = std::chrono::high_resolution_clock::now();
+  auto currentTime = std::chrono::high_resolution_clock::now();
+
+  vk::Extent2D swapChainExtent = _instance->getSwapChainExtent();
+
+  float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+  UniformBufferObject ubo{};
+  ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+  ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+  ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
+  ubo.proj[1][1] *= -1;
+  memcpy((void*)((UniformBufferObject*)_data + currentFrame), &ubo, sizeof(ubo));
+}

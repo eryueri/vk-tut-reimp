@@ -13,14 +13,17 @@ public:
 public:
   vk::Pipeline getGraphicsPipeline() const;
   vk::PipelineLayout getGraphicsPipelineLayout() const;
+  vk::DescriptorPool getDescriptorPool() const;
+  vk::DescriptorSetLayout getDescriptorSetLayout() const;
   vk::Buffer getBuffer(uint32_t index) const;
-  void* getMemoryMap(uint32_t index) const;
 public:
   uint32_t createBuffer(
       vk::DeviceSize size, 
       vk::BufferUsageFlags usage, 
       vk::MemoryPropertyFlags memoryProp
       );
+
+  void mapMemory(uint32_t index, vk::DeviceSize size, void** mem);
 
   void storeBuffer(
       vk::Buffer src, 
@@ -41,16 +44,15 @@ private:
   vk::Pipeline _graphicsPipeline = nullptr;
   std::unordered_map<uint32_t, vk::Buffer> _buffers;
   std::unordered_map<uint32_t, vk::DeviceMemory> _memories;
-  std::unordered_map<uint32_t, void*> _memoriesMapped;
 
   vk::DescriptorPool _descriptorPool = nullptr;
-  std::vector<vk::DescriptorSet> descriptorSets;
 private:
   void createDescriptorSetLayout();
   void createGraphicsPipeline();
   void createDescriptorPool();
-  void createDescriptorSets();
 private:
+  void cleanupDescriptorPool();
+  void cleanupDescriptorSetLayout();
   void cleanupGraphicsPipelineLayout();
   void cleanupGraphicsPipeline();
   void cleanupBufferMemory();
