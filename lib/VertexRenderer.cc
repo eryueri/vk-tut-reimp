@@ -31,6 +31,7 @@ void Renderer::init(VulkanInstance* instance, RenderAssets* assets) {
   _device = _instance->getLogicalDevice();
   _gpu = _instance->getGPU();
 
+  createTextureImage();
   allocateVertexBuffer();
   allocateIndexBuffer();
   allocateUniformBuffer();
@@ -127,7 +128,7 @@ void Renderer::createTextureImage() {
 
   stbi_image_free(pixels);
 
-  _assets->createImage(
+  _imageIndex = _assets->createImage(
       texWidth, 
       texHeight, 
       vk::Format::eR8G8B8A8Srgb, 
@@ -135,6 +136,13 @@ void Renderer::createTextureImage() {
       vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled, 
       vk::MemoryPropertyFlagBits::eDeviceLocal
       );
+
+  transitionImageLayout(_assets->getImage(_imageIndex.value()), vk::Format::eR8G8B8A8Srgb, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+  _assets->storeBufferToImage(stagingBuffer, _imageIndex.value(), texWidth, texHeight);
+  transitionImageLayout(_assets->getImage(_imageIndex.value()), vk::Format::eR8G8B8A8Srgb, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+
+  _device.destroyBuffer(stagingBuffer);
+  _device.freeMemory(stagingMemory);
 }
 
 void Renderer::allocateVertexBuffer() {
@@ -234,12 +242,24 @@ void Renderer::transitionImageLayout(vk::Image image, vk::Format format, vk::Ima
            .setSubresourceRange(vk::ImageSubresourceRange(
                  vk::ImageAspectFlagBits::eColor, 
                  0, 1, 0, 1
-                 ))
-           .setSrcAccessMask(vk::AccessFlags(0))
-           .setDstAccessMask(vk::AccessFlags(0));
+                 ));
+
+    vk::PipelineStageFlags sourceStage, dstStage;
+
+    if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
+      barrier.setSrcAccessMask(vk::AccessFlags(0))
+             .setDstAccessMask(vk::AccessFlagBits::eTransferWrite);
+      sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+      dstStage = vk::PipelineStageFlagBits::eTransfer;
+    } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+      barrier.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+             .setDstAccessMask(vk::AccessFlagBits::eTransferRead);
+      sourceStage = vk::PipelineStageFlagBits::eTransfer;
+      dstStage = vk::PipelineStageFlagBits::eFragmentShader;
+    }
 
     commandBuffer.pipelineBarrier(
-        vk::PipelineStageFlags(0), vk::PipelineStageFlags(0), 
+        sourceStage, dstStage, 
         vk::DependencyFlags(0), 
         0, nullptr, 
         0, nullptr, 

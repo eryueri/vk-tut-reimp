@@ -17,6 +17,7 @@ public:
   vk::DescriptorSetLayout getDescriptorSetLayout() const;
   const vk::DescriptorSet* getDescriptorSet() const;
   vk::Buffer getBuffer(uint32_t index) const;
+  vk::Image getImage(uint32_t index) const;
 public:
   uint32_t createImage(
       uint32_t width, 

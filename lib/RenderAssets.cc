@@ -88,6 +88,10 @@ vk::Buffer RenderAssets::getBuffer(uint32_t index) const {
   return _buffers.at(index);
 }
 
+vk::Image RenderAssets::getImage(uint32_t index) const {
+  return _images.at(index);
+}
+
 uint32_t RenderAssets::createImage(
     uint32_t width, 
     uint32_t height, 
@@ -209,7 +213,19 @@ void RenderAssets::storeBuffer(vk::Buffer src, uint32_t dst, vk::DeviceSize size
 }
 
 void RenderAssets::storeBufferToImage(vk::Buffer src, uint32_t dst, const uint32_t& width, const uint32_t& height) {
-
+  vk::BufferImageCopy region;
+  region.setBufferOffset(0)
+        .setBufferRowLength(0)
+        .setBufferImageHeight(0)
+        .setImageSubresource(vk::ImageSubresourceLayers(
+                 vk::ImageAspectFlagBits::eColor, 
+                 0, 0, 1
+                 ))
+        .setImageOffset({0, 0, 0})
+        .setImageExtent({width, height, 1});
+  vk::CommandBuffer commandBuffer = beginSingleTimeCommands(_device, _instance->getCommandPool());
+    commandBuffer.copyBufferToImage(src, _images.at(dst), vk::ImageLayout::eTransferDstOptimal, 1, &region);
+  submitSingleTimeCommands(commandBuffer, _instance->getGraphicsQueue(), _device, _instance->getCommandPool());
 }
 
 void RenderAssets::createDescriptorSetLayout() {
