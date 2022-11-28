@@ -103,7 +103,7 @@ void Renderer::drawFrame() {
 
 void Renderer::createTextureImage() {
   int texWidth, texHeight, texChannels;
-  stbi_uc* pixels = stbi_load("resources/texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+  stbi_uc* pixels = stbi_load("../resources/texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
   vk::DeviceSize imageSize = texWidth * texHeight * 4;
 
   IF_THROW(
@@ -253,9 +253,11 @@ void Renderer::transitionImageLayout(vk::Image image, vk::Format format, vk::Ima
       dstStage = vk::PipelineStageFlagBits::eTransfer;
     } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
       barrier.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
-             .setDstAccessMask(vk::AccessFlagBits::eTransferRead);
+             .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
       sourceStage = vk::PipelineStageFlagBits::eTransfer;
       dstStage = vk::PipelineStageFlagBits::eFragmentShader;
+    } else {
+      throw std::runtime_error("unsupported old/newLayout transfer...");
     }
 
     commandBuffer.pipelineBarrier(
