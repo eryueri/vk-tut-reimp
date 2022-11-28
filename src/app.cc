@@ -36,7 +36,7 @@ namespace myWindow {
 
     _vkInstance = new VulkanInstance;
     _assets = new RenderAssets;
-    _renderer = new VertexRenderer;
+    _renderer = new Renderer;
 
     _vkInstance->setWindow(_window);
     _vkInstance->init();

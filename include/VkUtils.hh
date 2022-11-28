@@ -27,3 +27,7 @@ std::tuple<vk::Buffer, vk::DeviceMemory> createStagingBuffer(
     vk::DeviceSize bufferSize, 
     vk::Device device, 
     vk::PhysicalDevice physicalDevice);
+
+vk::CommandBuffer beginSingleTimeCommands(vk::Device device, vk::CommandPool commandPool);
+
+void submitSingleTimeCommands(vk::CommandBuffer commandBuffer, vk::Queue queue, vk::Device device, vk::CommandPool commandPool);

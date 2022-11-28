@@ -185,3 +185,31 @@ std::tuple<vk::Buffer, vk::DeviceMemory> createStagingBuffer(
 
   return std::tuple(buffer, memory);
 }
+
+vk::CommandBuffer beginSingleTimeCommands(vk::Device device, vk::CommandPool commandPool) {
+  vk::CommandBufferAllocateInfo allocInfo;
+  allocInfo.setLevel(vk::CommandBufferLevel::ePrimary)
+           .setCommandPool(commandPool)
+           .setCommandBufferCount(1);
+
+  vk::CommandBuffer cmdBuffer = device.allocateCommandBuffers(allocInfo)[0];
+
+  vk::CommandBufferBeginInfo beginInfo;
+  beginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+
+  cmdBuffer.begin(beginInfo);
+
+  return cmdBuffer;
+}
+
+void submitSingleTimeCommands(vk::CommandBuffer commandBuffer, vk::Queue queue, vk::Device device, vk::CommandPool commandPool) {
+  commandBuffer.end();
+
+  vk::SubmitInfo submitInfo;
+  submitInfo.setCommandBuffers(commandBuffer);
+
+  queue.submit(submitInfo);
+  queue.waitIdle();
+
+  device.freeCommandBuffers(commandPool, 1, &commandBuffer);
+}

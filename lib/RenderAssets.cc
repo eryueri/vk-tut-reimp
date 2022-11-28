@@ -27,6 +27,7 @@ void RenderAssets::init(VulkanInstance* instance) {
 void RenderAssets::cleanup() {
   _device.waitIdle();
   cleanupBufferMemory();
+  cleanupImageMemory();
   cleanupDescriptorPool();
   cleanupDescriptorSetLayout();
   cleanupGraphicsPipeline();
@@ -50,9 +51,16 @@ void RenderAssets::cleanupGraphicsPipeline() {
 }
 
 void RenderAssets::cleanupBufferMemory() {
-  for (uint32_t i = 0; i < _index; i++) {
+  for (uint32_t i = 0; i < _bufferIndex; i++) {
     _device.destroyBuffer(_buffers.at(i));
     _device.freeMemory(_memories.at(i));
+  }
+}
+
+void RenderAssets::cleanupImageMemory() {
+  for (uint32_t i = 0; i < _imageIndex; i++) {
+    _device.destroyImage(_images.at(i));
+    _device.freeMemory(_imageMemories.at(i));
   }
 }
 
@@ -72,11 +80,59 @@ vk::DescriptorSetLayout RenderAssets::getDescriptorSetLayout() const {
   return _descriptorSetLayout;
 }
 
+const vk::DescriptorSet* RenderAssets::getDescriptorSet() const {
+  return _descriptorSets.data();
+}
+
 vk::Buffer RenderAssets::getBuffer(uint32_t index) const {
   return _buffers.at(index);
 }
 
-uint32_t RenderAssets::createBuffer(vk::DeviceSize size, 
+uint32_t RenderAssets::createImage(
+    uint32_t width, 
+    uint32_t height, 
+    vk::Format format, 
+    vk::ImageTiling tiling, 
+    vk::ImageUsageFlags usage, 
+    vk::MemoryPropertyFlags memoryProp) {
+  vk::ImageCreateInfo createInfo;
+  createInfo.setImageType(vk::ImageType::e2D)
+            .setExtent(vk::Extent3D(
+                  {width, height}, 
+                  1
+                  ))
+            .setMipLevels(1)
+            .setArrayLayers(1)
+            .setFormat(format)
+            .setTiling(tiling)
+            .setInitialLayout(vk::ImageLayout::eUndefined)
+            .setUsage(usage)
+            .setSamples(vk::SampleCountFlagBits::e1)
+            .setSharingMode(vk::SharingMode::eExclusive);
+
+  _images[_imageIndex] = _device.createImage(createInfo);
+  CHECK_NULL(_images[_imageIndex]);
+
+  vk::MemoryRequirements memRequirements = _device.getImageMemoryRequirements(_images.at(_imageIndex));
+
+  vk::MemoryAllocateInfo allocInfo;
+  allocInfo.setAllocationSize(memRequirements.size)
+           .setMemoryTypeIndex(findMemType(
+                 memRequirements.memoryTypeBits, 
+                 memoryProp, 
+                 _gpu
+                 ));
+
+  _imageMemories[_imageIndex] = _device.allocateMemory(allocInfo);
+  CHECK_NULL(_imageMemories[_imageIndex]);
+
+  _device.bindImageMemory(_images[_imageIndex], _imageMemories[_imageIndex], 0);
+
+  return _imageIndex++;
+}
+
+uint32_t RenderAssets::createBuffer(
+    vk::DeviceSize size, 
     vk:: BufferUsageFlags usage, 
     vk::MemoryPropertyFlags memoryProp) {
 
@@ -85,9 +141,9 @@ uint32_t RenderAssets::createBuffer(vk::DeviceSize size,
             .setUsage(usage)
             .setSharingMode(vk::SharingMode::eExclusive);
 
-  _buffers[_index] = _device.createBuffer(bufferInfo);
+  _buffers[_bufferIndex] = _device.createBuffer(bufferInfo);
 
-  vk::MemoryRequirements memRequirement = _device.getBufferMemoryRequirements(_buffers.at(_index));
+  vk::MemoryRequirements memRequirement = _device.getBufferMemoryRequirements(_buffers.at(_bufferIndex));
 
   vk::MemoryAllocateInfo memoryInfo;
   memoryInfo.setAllocationSize(memRequirement.size)
@@ -96,11 +152,11 @@ uint32_t RenderAssets::createBuffer(vk::DeviceSize size,
                   memoryProp, 
                   _gpu));
 
-  _memories[_index] = _device.allocateMemory(memoryInfo);
+  _memories[_bufferIndex] = _device.allocateMemory(memoryInfo);
 
-  _device.bindBufferMemory(_buffers.at(_index), _memories.at(_index), 0);
+  _device.bindBufferMemory(_buffers.at(_bufferIndex), _memories.at(_bufferIndex), 0);
 
-  return _index++;
+  return _bufferIndex++;
 }
 
 void RenderAssets::mapMemory(uint32_t index, vk::DeviceSize size, void** mem) {
@@ -110,32 +166,50 @@ void RenderAssets::mapMemory(uint32_t index, vk::DeviceSize size, void** mem) {
       );
 }
 
+// it's now specific for uniform buffers
+void RenderAssets::updateDescriptorSets(uint32_t index) {
+  std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, _descriptorSetLayout);
+  vk::DescriptorSetAllocateInfo allocInfo;
+  allocInfo.setDescriptorPool(_descriptorPool)
+           .setSetLayouts(layouts)
+           .setDescriptorSetCount(static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT));
+
+  _descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+  _descriptorSets = _device.allocateDescriptorSets(allocInfo);
+
+  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+    vk::DescriptorBufferInfo bufferInfo;
+    bufferInfo.setBuffer(_buffers[index])
+              .setOffset(0 + i * sizeof(UniformBufferObject))
+              .setRange(sizeof(UniformBufferObject));
+
+    vk::WriteDescriptorSet descriptorWrite;
+    descriptorWrite.setDstSet(_descriptorSets[i])
+                   .setDstBinding(0)
+                   .setDstArrayElement(0)
+                   .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+                   .setDescriptorCount(1)
+                   .setBufferInfo(bufferInfo);
+
+    _device.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+  }
+}
+
 void RenderAssets::storeBuffer(vk::Buffer src, uint32_t dst, vk::DeviceSize size) {
-  vk::CommandBufferAllocateInfo allocInfo;
-  allocInfo.setCommandBufferCount(1)
-           .setCommandPool(_commandPool)
-           .setLevel(vk::CommandBufferLevel::ePrimary);
-
-  vk::CommandBuffer cmdBuffer = _device.allocateCommandBuffers(allocInfo)[0];
-
   vk::BufferCopy copyRegion{};
   copyRegion.setDstOffset(0)
             .setSrcOffset(0)
             .setSize(size);
+  
+  vk::CommandBuffer cmdBuffer = beginSingleTimeCommands(_device, _instance->getCommandPool());
 
-  vk::CommandBufferBeginInfo beginInfo;
-  beginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
-
-  cmdBuffer.begin(beginInfo);
     cmdBuffer.copyBuffer(src, _buffers.at(dst), copyRegion);
-  cmdBuffer.end();
 
-  vk::SubmitInfo submitInfo;
-  submitInfo.setCommandBuffers(cmdBuffer);
+  submitSingleTimeCommands(cmdBuffer, _instance->getGraphicsQueue(), _device, _instance->getCommandPool());
+}
 
-  _graphicsQueue.submit(submitInfo);
-  _graphicsQueue.waitIdle();
-  _device.freeCommandBuffers(_commandPool, 1, &cmdBuffer);
+void RenderAssets::storeBufferToImage(vk::Buffer src, uint32_t dst, const uint32_t& width, const uint32_t& height) {
+
 }
 
 void RenderAssets::createDescriptorSetLayout() {

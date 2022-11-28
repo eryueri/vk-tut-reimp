@@ -2,7 +2,7 @@
 
 class GLFWwindow;
 
-class VertexRenderer;
+class Renderer;
 class VulkanInstance;
 class RenderAssets;
 
@@ -22,7 +22,7 @@ namespace myWindow{
   private:
     static MainWindow* _instance;
     GLFWwindow* _window;
-    VertexRenderer* _renderer;
+    Renderer* _renderer;
     VulkanInstance* _vkInstance;
     RenderAssets* _assets;
   };
