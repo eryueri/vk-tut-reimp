@@ -14,10 +14,10 @@
 #include "Macros.hh"
 
 const std::vector<Vertex> vertices = {
-  { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
-  { {  0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
-  { {  0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } },
-  { { -0.5f,  0.5f }, { 1.0f, 0.0f, 1.0f } },
+  { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
+  { {  0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
+  { {  0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+  { { -0.5f,  0.5f }, { 1.0f, 0.0f, 1.0f }, { 1.0f, 1.0f } },
 };
 
 const std::vector<uint16_t> indices = {
@@ -32,10 +32,11 @@ void Renderer::init(VulkanInstance* instance, RenderAssets* assets) {
   _gpu = _instance->getGPU();
 
   createTextureImage();
+  _assets->createImageView(_imageIndex.value());
   allocateVertexBuffer();
   allocateIndexBuffer();
   allocateUniformBuffer();
-  _assets->updateDescriptorSets(_uniformIndex.value());
+  _assets->updateDescriptorSets(_uniformIndex.value(), _imageIndex.value());
 }
 
 void Renderer::drawFrame() {
@@ -113,7 +114,7 @@ void Renderer::createTextureImage() {
 
   vk::Buffer stagingBuffer;
   vk::DeviceMemory stagingMemory;
-  std::tie(stagingBuffer, stagingMemory) = createStagingBuffer(imageSize, 
+  std::tie(stagingBuffer, stagingMemory) = myUtils::createStagingBuffer(imageSize, 
       _device, 
       _gpu);
 
@@ -145,12 +146,52 @@ void Renderer::createTextureImage() {
   _device.freeMemory(stagingMemory);
 }
 
+void Renderer::transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
+  vk::CommandBuffer commandBuffer = myUtils::beginSingleTimeCommands(_device, _instance->getCommandPool());
+    vk::ImageMemoryBarrier barrier;
+    barrier.setOldLayout(oldLayout)
+           .setNewLayout(newLayout)
+           .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setImage(image)
+           .setSubresourceRange(vk::ImageSubresourceRange(
+                 vk::ImageAspectFlagBits::eColor, 
+                 0, 1, 0, 1
+                 ));
+
+    vk::PipelineStageFlags sourceStage, dstStage;
+
+    if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
+      barrier.setSrcAccessMask(vk::AccessFlags(0))
+             .setDstAccessMask(vk::AccessFlagBits::eTransferWrite);
+      sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+      dstStage = vk::PipelineStageFlagBits::eTransfer;
+    } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+      barrier.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+             .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+      sourceStage = vk::PipelineStageFlagBits::eTransfer;
+      dstStage = vk::PipelineStageFlagBits::eFragmentShader;
+    } else {
+      throw std::runtime_error("unsupported old/newLayout transfer...");
+    }
+
+    commandBuffer.pipelineBarrier(
+        sourceStage, dstStage, 
+        vk::DependencyFlags(0), 
+        0, nullptr, 
+        0, nullptr, 
+        1, &barrier
+        );
+
+    myUtils::submitSingleTimeCommands(commandBuffer, _instance->getGraphicsQueue(), _device, _instance->getCommandPool());
+}
+
 void Renderer::allocateVertexBuffer() {
   vk::DeviceSize bufferSize = sizeof(Vertex) * vertices.size();
   vk::Buffer stagingBuffer;
   vk::DeviceMemory stagingMemory;
 
-  std::tie(stagingBuffer, stagingMemory) = createStagingBuffer(
+  std::tie(stagingBuffer, stagingMemory) = myUtils::createStagingBuffer(
       bufferSize,
       _device, 
       _gpu
@@ -180,7 +221,7 @@ void Renderer::allocateIndexBuffer() {
   vk::Buffer stagingBuffer;
   vk::DeviceMemory stagingMemory;
 
-  std::tie(stagingBuffer, stagingMemory) = createStagingBuffer(
+  std::tie(stagingBuffer, stagingMemory) = myUtils::createStagingBuffer(
       bufferSize,
       _device, 
       _gpu
@@ -229,44 +270,4 @@ void Renderer::updateUniformBuffer(uint32_t currentFrame) {
   ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
   ubo.proj[1][1] *= -1;
   memcpy((void*)((UniformBufferObject*)_data + currentFrame), &ubo, sizeof(ubo));
-}
-
-void Renderer::transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
-  vk::CommandBuffer commandBuffer = beginSingleTimeCommands(_device, _instance->getCommandPool());
-    vk::ImageMemoryBarrier barrier;
-    barrier.setOldLayout(oldLayout)
-           .setNewLayout(newLayout)
-           .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-           .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-           .setImage(image)
-           .setSubresourceRange(vk::ImageSubresourceRange(
-                 vk::ImageAspectFlagBits::eColor, 
-                 0, 1, 0, 1
-                 ));
-
-    vk::PipelineStageFlags sourceStage, dstStage;
-
-    if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
-      barrier.setSrcAccessMask(vk::AccessFlags(0))
-             .setDstAccessMask(vk::AccessFlagBits::eTransferWrite);
-      sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
-      dstStage = vk::PipelineStageFlagBits::eTransfer;
-    } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
-      barrier.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
-             .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
-      sourceStage = vk::PipelineStageFlagBits::eTransfer;
-      dstStage = vk::PipelineStageFlagBits::eFragmentShader;
-    } else {
-      throw std::runtime_error("unsupported old/newLayout transfer...");
-    }
-
-    commandBuffer.pipelineBarrier(
-        sourceStage, dstStage, 
-        vk::DependencyFlags(0), 
-        0, nullptr, 
-        0, nullptr, 
-        1, &barrier
-        );
-
-  submitSingleTimeCommands(commandBuffer, _instance->getGraphicsQueue(), _device, _instance->getCommandPool());
 }

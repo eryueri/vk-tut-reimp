@@ -215,7 +215,7 @@ void VulkanInstance::applyPresentQueue(uint32_t imageIndex) {
 
 void VulkanInstance::createInstance() {
   IF_THROW(
-      _enableValidationLayers && !validationLayerSupportChecked(validationLayers),
+      _enableValidationLayers && !myUtils::validationLayerSupportChecked(validationLayers),
       failed to enable validation layer
       );
 
@@ -263,7 +263,7 @@ void VulkanInstance::pickPhysicalDevice() {
   for (const auto& phyDevice : phyDevices) {
     bool result;
     QueueFamilyIndices* indices;
-    std::tie(result, indices) = isDeviceSuitable(phyDevice, _surface, deviceExtensions);
+    std::tie(result, indices) = myUtils::isDeviceSuitable(phyDevice, _surface, deviceExtensions);
     if (result) {
       _queueIndices = indices;
       _gpu = phyDevice;
@@ -287,12 +287,13 @@ void VulkanInstance::createLogicalDevice() {
   }
 
   vk::PhysicalDeviceFeatures deviceFeatures;
+  deviceFeatures.setSamplerAnisotropy(true);
 
   vk::DeviceCreateInfo createInfo;
-  createInfo.setQueueCreateInfos(queueCreateInfos);
-  createInfo.setPEnabledFeatures(&deviceFeatures);
-  createInfo.setPEnabledExtensionNames(deviceExtensions);
-  createInfo.setEnabledLayerCount(0);
+  createInfo.setQueueCreateInfos(queueCreateInfos)
+            .setPEnabledFeatures(&deviceFeatures)
+            .setPEnabledExtensionNames(deviceExtensions)
+            .setEnabledLayerCount(0);
 
   _device = _gpu.createDevice(createInfo);
   CHECK_NULL(_device);
@@ -304,11 +305,11 @@ void VulkanInstance::createLogicalDevice() {
 }
 
 void VulkanInstance::createSwapChain() {
-  SwapChainSupportDetails swapChainSupport = querySwapChainSupport(_gpu, _surface);
+  SwapChainSupportDetails swapChainSupport = myUtils::querySwapChainSupport(_gpu, _surface);
 
-  vk::SurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
-  vk::PresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
-  vk::Extent2D extent = chooseSwapExtent(_window, swapChainSupport.capabilities);
+  vk::SurfaceFormatKHR surfaceFormat = myUtils::chooseSwapSurfaceFormat(swapChainSupport.formats);
+  vk::PresentModeKHR presentMode = myUtils::chooseSwapPresentMode(swapChainSupport.presentModes);
+  vk::Extent2D extent = myUtils::chooseSwapExtent(_window, swapChainSupport.capabilities);
 
   uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
 
@@ -349,20 +350,8 @@ void VulkanInstance::createSwapChain() {
 void VulkanInstance::createImageViews() {
   _swapChainImageViews.resize(_swapChainImages.size());
   for (size_t i = 0; i < _swapChainImages.size(); i++) {
-    vk::ImageViewCreateInfo createInfo;
-    createInfo.setImage(_swapChainImages[i]);
-    createInfo.setViewType(vk::ImageViewType::e2D);
-    createInfo.setFormat(_swapChainImageFormat);
-    createInfo.setComponents(vk::ComponentMapping(
-          vk::ComponentSwizzle::eIdentity,
-          vk::ComponentSwizzle::eIdentity,
-          vk::ComponentSwizzle::eIdentity,
-          vk::ComponentSwizzle::eIdentity)
-        );
-    createInfo.setSubresourceRange(vk::ImageSubresourceRange( // SUS
-          vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)
-        );
-    _swapChainImageViews[i] = _device.createImageView(createInfo);
+    _swapChainImageViews[i] = myUtils::createImageView(_swapChainImages[i], _swapChainImageFormat, _device);
+    CHECK_NULL(_swapChainImageViews[i]);
   }
 }
 

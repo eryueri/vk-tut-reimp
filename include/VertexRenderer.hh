@@ -11,10 +11,6 @@ public:
   void init(VulkanInstance* instance, RenderAssets* assets);
   void drawFrame();
 private:
-  void createTextureImage();
-  void allocateVertexBuffer();
-  void allocateIndexBuffer();
-  void allocateUniformBuffer();
   void updateUniformBuffer(uint32_t currentFrame);
   void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
 private:
@@ -29,4 +25,9 @@ private:
 private:
   VulkanInstance* _instance;
   RenderAssets* _assets;
+private:
+  void createTextureImage();
+  void allocateVertexBuffer();
+  void allocateIndexBuffer();
+  void allocateUniformBuffer();
 };

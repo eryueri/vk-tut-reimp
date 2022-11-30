@@ -18,6 +18,8 @@ public:
   const vk::DescriptorSet* getDescriptorSet() const;
   vk::Buffer getBuffer(uint32_t index) const;
   vk::Image getImage(uint32_t index) const;
+  vk::ImageView getImageView(uint32_t index) const;
+  vk::Sampler getTextureSampler() const;
 public:
   uint32_t createImage(
       uint32_t width, 
@@ -28,6 +30,8 @@ public:
       vk::MemoryPropertyFlags memoryProp
       );
 
+  void createImageView(uint32_t index);
+
   uint32_t createBuffer(
       vk::DeviceSize size, 
       vk::BufferUsageFlags usage, 
@@ -36,7 +40,7 @@ public:
 
   void mapMemory(uint32_t index, vk::DeviceSize size, void** mem);
 
-  void updateDescriptorSets(uint32_t index);
+  void updateDescriptorSets(uint32_t bufferIndex, uint32_t imageIndex);
 
   void storeBuffer(
       vk::Buffer src, 
@@ -67,6 +71,8 @@ private:
   std::unordered_map<uint32_t, vk::DeviceMemory> _memories;
   std::unordered_map<uint32_t, vk::Image> _images;
   std::unordered_map<uint32_t, vk::DeviceMemory> _imageMemories;
+  std::unordered_map<uint32_t, vk::ImageView> _imageViews;
+  vk::Sampler _textureSampler;
 
   vk::DescriptorPool _descriptorPool = nullptr;
   std::vector<vk::DescriptorSet> _descriptorSets;
@@ -74,6 +80,7 @@ private:
   void createDescriptorSetLayout();
   void createGraphicsPipeline();
   void createDescriptorPool();
+  void createTextureSampler();
 private:
   void cleanupDescriptorPool();
   void cleanupDescriptorSetLayout();
@@ -81,4 +88,6 @@ private:
   void cleanupGraphicsPipeline();
   void cleanupBufferMemory();
   void cleanupImageMemory();
+  void cleanupImageViews();
+  void cleanupSamplers();
 };

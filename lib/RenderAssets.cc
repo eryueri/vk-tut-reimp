@@ -22,12 +22,15 @@ void RenderAssets::init(VulkanInstance* instance) {
   createDescriptorSetLayout();
   createGraphicsPipeline();
   createDescriptorPool();
+  createTextureSampler();
 }
 
 void RenderAssets::cleanup() {
   _device.waitIdle();
+  cleanupImageViews();
   cleanupBufferMemory();
   cleanupImageMemory();
+  cleanupSamplers();
   cleanupDescriptorPool();
   cleanupDescriptorSetLayout();
   cleanupGraphicsPipeline();
@@ -62,6 +65,20 @@ void RenderAssets::cleanupImageMemory() {
     _device.destroyImage(_images.at(i));
     _device.freeMemory(_imageMemories.at(i));
   }
+}
+
+void RenderAssets::cleanupImageViews() {
+  for (uint32_t i = 0; i < _imageIndex; i++) {
+    try {
+      _device.destroyImageView(_imageViews.at(i));
+    } catch (std::out_of_range& e) {
+      continue;
+    }
+  }
+}
+
+void RenderAssets::cleanupSamplers() {
+  _device.destroySampler(_textureSampler);
 }
 
 vk::Pipeline RenderAssets::getGraphicsPipeline() const {
@@ -121,7 +138,7 @@ uint32_t RenderAssets::createImage(
 
   vk::MemoryAllocateInfo allocInfo;
   allocInfo.setAllocationSize(memRequirements.size)
-           .setMemoryTypeIndex(findMemType(
+           .setMemoryTypeIndex(myUtils::findMemType(
                  memRequirements.memoryTypeBits, 
                  memoryProp, 
                  _gpu
@@ -133,6 +150,11 @@ uint32_t RenderAssets::createImage(
   _device.bindImageMemory(_images[_imageIndex], _imageMemories[_imageIndex], 0);
 
   return _imageIndex++;
+}
+
+void RenderAssets::createImageView(uint32_t index) {
+  _imageViews[index] = myUtils::createImageView(_images.at(index), vk::Format::eR8G8B8A8Srgb, _device);
+  CHECK_NULL(_imageViews.at(index));
 }
 
 uint32_t RenderAssets::createBuffer(
@@ -151,7 +173,7 @@ uint32_t RenderAssets::createBuffer(
 
   vk::MemoryAllocateInfo memoryInfo;
   memoryInfo.setAllocationSize(memRequirement.size)
-            .setMemoryTypeIndex(findMemType(
+            .setMemoryTypeIndex(myUtils::findMemType(
                   memRequirement.memoryTypeBits, 
                   memoryProp, 
                   _gpu));
@@ -170,8 +192,8 @@ void RenderAssets::mapMemory(uint32_t index, vk::DeviceSize size, void** mem) {
       );
 }
 
-// it's now specific for uniform buffers
-void RenderAssets::updateDescriptorSets(uint32_t index) {
+// added things for textureimage
+void RenderAssets::updateDescriptorSets(uint32_t bufferIndex, uint32_t imageIndex) {
   std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, _descriptorSetLayout);
   vk::DescriptorSetAllocateInfo allocInfo;
   allocInfo.setDescriptorPool(_descriptorPool)
@@ -183,19 +205,31 @@ void RenderAssets::updateDescriptorSets(uint32_t index) {
 
   for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
     vk::DescriptorBufferInfo bufferInfo;
-    bufferInfo.setBuffer(_buffers[index])
+    bufferInfo.setBuffer(_buffers.at(bufferIndex))
               .setOffset(0 + i * sizeof(UniformBufferObject))
               .setRange(sizeof(UniformBufferObject));
 
-    vk::WriteDescriptorSet descriptorWrite;
-    descriptorWrite.setDstSet(_descriptorSets[i])
-                   .setDstBinding(0)
-                   .setDstArrayElement(0)
-                   .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-                   .setDescriptorCount(1)
-                   .setBufferInfo(bufferInfo);
+    vk::DescriptorImageInfo imageInfo;
+    imageInfo.setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+             .setImageView(_imageViews.at(imageIndex))
+             .setSampler(_textureSampler);
 
-    _device.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+    std::vector<vk::WriteDescriptorSet> descriptorWrites;
+    descriptorWrites.resize(2);
+    descriptorWrites[0].setDstSet(_descriptorSets[i])
+                       .setDstBinding(0)
+                       .setDstArrayElement(0)
+                       .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+                       .setDescriptorCount(1)
+                       .setBufferInfo(bufferInfo);
+    descriptorWrites[1].setDstSet(_descriptorSets[i])
+                       .setDstBinding(1)
+                       .setDstArrayElement(0)
+                       .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                       .setDescriptorCount(1)
+                       .setImageInfo(imageInfo);
+
+    _device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
   }
 }
 
@@ -205,11 +239,11 @@ void RenderAssets::storeBuffer(vk::Buffer src, uint32_t dst, vk::DeviceSize size
             .setSrcOffset(0)
             .setSize(size);
   
-  vk::CommandBuffer cmdBuffer = beginSingleTimeCommands(_device, _instance->getCommandPool());
+  vk::CommandBuffer cmdBuffer = myUtils::beginSingleTimeCommands(_device, _instance->getCommandPool());
 
     cmdBuffer.copyBuffer(src, _buffers.at(dst), copyRegion);
 
-  submitSingleTimeCommands(cmdBuffer, _instance->getGraphicsQueue(), _device, _instance->getCommandPool());
+    myUtils::submitSingleTimeCommands(cmdBuffer, _instance->getGraphicsQueue(), _device, _instance->getCommandPool());
 }
 
 void RenderAssets::storeBufferToImage(vk::Buffer src, uint32_t dst, const uint32_t& width, const uint32_t& height) {
@@ -223,9 +257,9 @@ void RenderAssets::storeBufferToImage(vk::Buffer src, uint32_t dst, const uint32
                  ))
         .setImageOffset({0, 0, 0})
         .setImageExtent({width, height, 1});
-  vk::CommandBuffer commandBuffer = beginSingleTimeCommands(_device, _instance->getCommandPool());
+  vk::CommandBuffer commandBuffer = myUtils::beginSingleTimeCommands(_device, _instance->getCommandPool());
     commandBuffer.copyBufferToImage(src, _images.at(dst), vk::ImageLayout::eTransferDstOptimal, 1, &region);
-  submitSingleTimeCommands(commandBuffer, _instance->getGraphicsQueue(), _device, _instance->getCommandPool());
+    myUtils::submitSingleTimeCommands(commandBuffer, _instance->getGraphicsQueue(), _device, _instance->getCommandPool());
 }
 
 void RenderAssets::createDescriptorSetLayout() {
@@ -235,19 +269,33 @@ void RenderAssets::createDescriptorSetLayout() {
                       .setDescriptorType(vk::DescriptorType::eUniformBuffer)
                       .setDescriptorCount(1);
 
+  vk::DescriptorSetLayoutBinding samplerDescLayoutBinding;
+  samplerDescLayoutBinding.setBinding(1)
+                          .setStageFlags(vk::ShaderStageFlagBits::eFragment)
+                          .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                          .setImmutableSamplers(nullptr) // this function has a side-effect that will make DescriptorCount be set to 0
+                                                         // so it must be called before setting DescriptorCount
+                                                         // how strange!
+                          .setDescriptorCount(1);
+
+  std::array<vk::DescriptorSetLayoutBinding, 2> bindings = {
+    uboDescLayoutBinding, 
+    samplerDescLayoutBinding
+  };
+
   vk::DescriptorSetLayoutCreateInfo createInfo{};
-  createInfo.setBindings(uboDescLayoutBinding)
-            .setBindingCount(1);
+  createInfo.setBindingCount(bindings.size())
+            .setPBindings(bindings.data());
 
   _descriptorSetLayout = _device.createDescriptorSetLayout(createInfo);
 }
 
 void RenderAssets::createGraphicsPipeline() {
-  auto vertShaderCode = readBinaryFile("../glslShaders/build/vert.spv");
-  auto fragShaderCode = readBinaryFile("../glslShaders/build/frag.spv");
+  auto vertShaderCode = myUtils::readBinaryFile("../glslShaders/build/vert.spv");
+  auto fragShaderCode = myUtils::readBinaryFile("../glslShaders/build/frag.spv");
 
-  vk::ShaderModule vertShaderModule = createShaderModule(_device, vertShaderCode);
-  vk::ShaderModule fragShaderModule = createShaderModule(_device, fragShaderCode);
+  vk::ShaderModule vertShaderModule = myUtils::createShaderModule(_device, vertShaderCode);
+  vk::ShaderModule fragShaderModule = myUtils::createShaderModule(_device, fragShaderCode);
 
   vk::PipelineShaderStageCreateInfo vertShaderStageInfo;
   vertShaderStageInfo.setStage(vk::ShaderStageFlagBits::eVertex);
@@ -358,15 +406,40 @@ void RenderAssets::createGraphicsPipeline() {
 }
 
 void RenderAssets::createDescriptorPool() {
-  vk::DescriptorPoolSize poolSize;
-  poolSize.setType(vk::DescriptorType::eUniformBuffer)
-          .setDescriptorCount(static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT));
+  std::vector<vk::DescriptorPoolSize> poolSizes;
+  poolSizes.resize(2);
+  poolSizes[0].setType(vk::DescriptorType::eUniformBuffer)
+              .setDescriptorCount(static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT));
+
+  poolSizes[1].setType(vk::DescriptorType::eCombinedImageSampler)
+              .setDescriptorCount(static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT));
 
   vk::DescriptorPoolCreateInfo createInfo;
-  createInfo.setPoolSizeCount(1)
-            .setPoolSizes(poolSize)
+  createInfo.setPoolSizes(poolSizes)
             .setMaxSets(static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT));
 
   _descriptorPool = _device.createDescriptorPool(createInfo);
 }
 
+void RenderAssets::createTextureSampler() {
+  vk::PhysicalDeviceProperties props = _gpu.getProperties();
+
+  vk::SamplerCreateInfo createInfo;
+  createInfo.setMagFilter(vk::Filter::eLinear)
+            .setMinFilter(vk::Filter::eLinear)
+            .setAddressModeU(vk::SamplerAddressMode::eRepeat)
+            .setAddressModeV(vk::SamplerAddressMode::eRepeat)
+            .setAddressModeW(vk::SamplerAddressMode::eRepeat)
+            .setAnisotropyEnable(true)
+            .setMaxAnisotropy(props.limits.maxSamplerAnisotropy)
+            .setBorderColor(vk::BorderColor::eIntOpaqueBlack)
+            .setUnnormalizedCoordinates(false)
+            .setCompareEnable(false)
+            .setCompareOp(vk::CompareOp::eAlways)
+            .setMipmapMode(vk::SamplerMipmapMode::eLinear)
+            .setMipLodBias(0.0f)
+            .setMinLod(0.0f)
+            .setMaxLod(0.0f);
+
+  _textureSampler = _device.createSampler(createInfo);
+}
